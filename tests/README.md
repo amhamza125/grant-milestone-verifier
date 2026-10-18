@@ -2,10 +2,11 @@
 
 Runnable end-to-end verification for the Grant Milestone Verifier intelligent
 contract. It runs against a live StudioNet deployment and exercises the full
-grant lifecycle with two wallets: escrowed multi-tranche grants, milestone
+grant lifecycle with three wallets: escrowed multi-tranche grants, milestone
 evidence, the AI jury, tranche releases, cancellation with refunds, the pause
 gate, owner transfer, and adversarial cases (prompt injection, sender-bound
-access control, escrow mismatch, double submission, anti-gaming).
+access control, outsider assessment/release gates, escrow mismatch, double
+submission, anti-gaming).
 
 ## Run it
 
@@ -14,6 +15,7 @@ cd tests
 GMV_CONTRACT=0xYourContract \
 GMV_KEY_A=0xGrantorPrivateKey \
 GMV_KEY_B=0xBuilderPrivateKey \
+GMV_KEY_C=0xOutsiderPrivateKey \
 node run.mjs
 node finalize.mjs
 ```
@@ -23,11 +25,13 @@ node finalize.mjs
 - `GMV_KEY_A` — grantor wallet (deploys, creates grants, locks escrow, owns
   the pause switch).
 - `GMV_KEY_B` — builder wallet (submits evidence, receives tranche payouts).
+- `GMV_KEY_C` — outsider wallet (not a party to any grant; proves the
+  assessment/release gates reject strangers).
 - Keys go through environment variables only. Nothing with a private key is
   committed to this repo, ever.
 - The suite expects a **fresh** deployment (grant ids start at 0).
 
-`run.mjs` writes `results/results.json` (12 scenarios + every tx hash) and a
+`run.mjs` writes `results/results.json` (13 scenarios + every tx hash) and a
 human-readable `results/test-log.txt`. `finalize.mjs` waits for the payout
 transactions to reach FINALIZED and checks every wei moved exactly as the
 contract recorded, writing `results/finalize.json`.

@@ -26,16 +26,16 @@ Keep a Changelog, and versioning follows SemVer.
   raises a fail-closed error -- state unchanged, no payout. Anti-gaming jury
   rules: evidence must reference concrete deliverables from the spec, vague
   claims return NOT_MET, injected instructions in evidence are ignored.
-- `tests/`: runnable end-to-end suite (`run.mjs`, 12 scenarios) plus
+- `tests/`: runnable end-to-end suite (`run.mjs`, 13 scenarios) plus
   finalization + exact-payout verifier (`finalize.mjs`); local adversarial
   harness for the verdict parser (`validate_verdict.py`, 12/12); keys via
   environment only.
-- `docs/VERIFICATION.md`: contract specs, 12/12 pass table, explorer-linked
+- `docs/VERIFICATION.md`: contract specs, 13/13 pass table, explorer-linked
   transaction hashes, payout verification to the wei, honest limitations.
 
 ### Verified
 - Deployed and tested on GenLayer StudioNet (chain 61999).
-- Deployment: `0xE89975735475F3b06B33cc89A331D82153446964`
-  (https://explorer-studio.genlayer.com/address/0xE89975735475F3b06B33cc89A331D82153446964)
-- 12/12 scenarios passed; payout transactions FINALIZED; builder payouts
+- Deployment: `0x4a7246A289e1528e5ac08be417C7c84F9BF26d43`
+  (https://explorer-studio.genlayer.com/address/0x4a7246A289e1528e5ac08be417C7c84F9BF26d43)
+- 13/13 scenarios passed; payout transactions FINALIZED; builder payouts
   verified to the wei against on-chain grant records.

@@ -1,9 +1,11 @@
-grantor start GEN: 87.5 | builder start GEN: 4
+Grant Milestone Verifier — test run log
+Contract: 0x4a7246A289e1528e5ac08be417C7c84F9BF26d43
+Grantor: 0xD2aF69BB67d446526661A80a280820599c601ed3
+Builder: 0x0BbA411375d7074178980E610B5311dD6Ed34d74
+Outsider: 0xD0Ec4561b79533e174eAe8e803473fe082bb4090
+
 [PASS] protocol_state :: {"paused":false,"owner":"0xd2af69bb67d446526661a80a280820599c601ed3","grant_count":"0","total_assessed":"0","contract_balance_wei":"0"}
 [PASS] s1_create :: status=FUNDED milestones=3
-  s1 milestone 0: met=true score=95 status=APPROVED
-  s1 milestone 1: met=true score=90 status=APPROVED
-  s1 milestone 2: met=true score=100 status=APPROVED
 [PASS] s1_happy_path :: all MET, all paid 0.5 GEN, grant=COMPLETE
 [PASS] s2_notmet :: verdict NOT_MET score=2, milestone back to OPEN, escrow untouched
 [PASS] s2_resubmit_met :: resubmission MET, 0.5 GEN paid, grant=COMPLETE
@@ -16,6 +18,8 @@ grantor start GEN: 87.5 | builder start GEN: 4
 [PASS] s9_release_no_verdict :: release on SUBMITTED milestone -> execution_result=ERROR, nothing paid
 [PASS] s10_pause_gate :: submit while paused -> ERROR; after resume: MET, 0.25 GEN paid, grant=COMPLETE
 [PASS] s11_owner_transfer :: owner->builder, builder pauses, old owner blocked, builder resumes + transfers back
-[PASS] s12_antigaming :: unrelated links -> NOT_MET score=2, nothing paid (anti-gaming holds)
-[FAIL] cleanup :: leftover grants cancelled, contract_balance_wei=2000000000000000000, history_events=44
-DONE: 15/16 scenarios passed
+[PASS] s12_antigaming :: unrelated links -> NOT_MET score=1, nothing paid (anti-gaming holds)
+[PASS] s13_outsider_gates :: outsider assess -> ONLY_PARTY_ASSESS, outsider release -> ONLY_PARTY_RELEASE, milestone still SUBMITTED, nothing paid
+[PASS] cleanup :: leftover grants cancelled, contract_balance_wei=1000000000000000000 (S7 residual), history_events=47
+
+TOTAL: 17/17 steps passed

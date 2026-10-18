@@ -1,52 +1,121 @@
 // Grant Milestone Verifier adversarial/verification test suite.
-// Run from tests/:  GMV_CONTRACT=0x... GMV_KEY_A=0x... GMV_KEY_B=0x... node run.mjs
+// Run from tests/:  GMV_CONTRACT=0x... GMV_KEY_A=0x... GMV_KEY_B=0x... GMV_KEY_C=0x... node run.mjs
 // Then: node finalize.mjs  (verifies finalization + exact payouts)
 // Keys are NEVER committed — pass them via environment only.
 // The suite expects a FRESH GrantMilestoneVerifier deployment (grant ids start at 0).
 //
-// Wallets: A = grantor/deployer/owner, B = builder.
-// 12 scenarios: happy path, NOT_MET+resubmit, adversarial verdict handling,
+// Wallets: A = grantor/deployer/owner, B = builder, C = outsider (not a party to any grant).
+// 13 scenarios: happy path, NOT_MET+resubmit, adversarial verdict handling,
 // sender-bound evidence, sender-bound cancel, mid-grant cancel, escrow mismatch,
 // double submission, release-without-verdict, pause gate, owner transfer,
-// anti-gaming (links without spec coverage).
+// anti-gaming (links without spec coverage), outsider assessment/release gates.
 import { createClient } from 'genlayer-js';
 import { studionet } from 'genlayer-js/chains';
 import { privateKeyToAccount } from 'viem/accounts';
 import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 
-const ADDR = process.env.GMV_CONTRACT || '0xE89975735475F3b06B33cc89A331D82153446964';
+const ADDR = process.env.GMV_CONTRACT || '0x4a7246A289e1528e5ac08be417C7c84F9BF26d43';
 const KEY_A = process.env.GMV_KEY_A;
 const KEY_B = process.env.GMV_KEY_B;
-if (!KEY_A || !KEY_B) {
-  console.error('Set GMV_KEY_A (grantor) and GMV_KEY_B (builder) env vars. Keys are never stored in the repo.');
+const KEY_C = process.env.GMV_KEY_C;
+if (!KEY_A || !KEY_B || !KEY_C) {
+  console.error('Set GMV_KEY_A (grantor), GMV_KEY_B (builder) and GMV_KEY_C (outsider) env vars. Keys are never stored in the repo.');
   process.exit(1);
 }
 const grantorAcct = privateKeyToAccount(KEY_A);
 const builderAcct = privateKeyToAccount(KEY_B);
-const A = createClient({ chain: studionet, account: grantorAcct });
-const B = createClient({ chain: studionet, account: builderAcct });
+const strangerAcct = privateKeyToAccount(KEY_C);
+// Resilient RPC: StudioNet's endpoint occasionally returns a proxy HTML error
+// page instead of JSON (transient). Retry transport-level failures only — a
+// consensus ERROR receipt is a *successful* send and is never retried.
+const isTransportError = (e) => {
+  const s = String((e && (e.message || e)) || '');
+  return /DOCTYPE|not valid JSON|fetch failed|ECONNRESET|ETIMEDOUT|EAI_AGAIN|socket hang up|terminated| 502| 503| 504/i.test(s);
+};
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const harden = (client) => {
+  const w = client.writeContract.bind(client);
+  client.writeContract = async (tx) => {
+    for (let i = 0; i < 8; i++) {
+      try { return await w(tx); }
+      catch (e) {
+        if (!isTransportError(e)) throw e;
+        log(`  transport error (${String(e.message || e).slice(0, 90)}), retry ${i + 1}/8 in 20s`);
+        await sleep(20000);
+      }
+    }
+    throw new Error('writeContract: RPC still failing after 8 retries');
+  };
+  const st = client.sendTransaction.bind(client);
+  client.sendTransaction = async (tx) => {
+    for (let i = 0; i < 8; i++) {
+      try { return await st(tx); }
+      catch (e) {
+        if (!isTransportError(e)) throw e;
+        log(`  transport error on sendTransaction, retry ${i + 1}/8 in 20s`);
+        await sleep(20000);
+      }
+    }
+    throw new Error('sendTransaction: RPC still failing after 8 retries');
+  };
+  return client;
+};
+const A = harden(createClient({ chain: studionet, account: grantorAcct }));
+const B = harden(createClient({ chain: studionet, account: builderAcct }));
+const C = harden(createClient({ chain: studionet, account: strangerAcct }));
 const ro = createClient({ chain: studionet });
+{
+  const rc = ro.readContract.bind(ro);
+  ro.readContract = async (args) => {
+    for (let i = 0; i < 8; i++) {
+      try { return await rc(args); }
+      catch (e) {
+        if (!isTransportError(e)) throw e;
+        await sleep(15000);
+      }
+    }
+    throw new Error('readContract: RPC still failing after 8 retries');
+  };
+}
 const GEN = 10n ** 18n;
-const results = { contract: ADDR, grantor: grantorAcct.address, builder: builderAcct.address, steps: [], txs: {} };
+const results = { contract: ADDR, grantor: grantorAcct.address, builder: builderAcct.address, outsider: strangerAcct.address, steps: [], txs: {} };
 const log = (...a) => console.log(...a);
 const step = (name, pass, info) => { results.steps.push({ name, pass, info }); log(`[${pass ? 'PASS' : 'FAIL'}] ${name} :: ${info}`); };
 const bal = async (a) => { const r = await fetch('https://studio.genlayer.com/api', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_getBalance', params: [a, 'latest'] }) }); return BigInt((await r.json()).result); };
 const wait = (client, hash) => client.waitForTransactionReceipt({ hash, status: 'ACCEPTED', retries: 240, interval: 5000 });
 const execResult = (r) => r.consensus_data?.leader_receipt?.[0]?.execution_result;
-const readGrant = async (id) => JSON.parse(await ro.readContract({ address: ADDR, functionName: 'get_grant', args: [id] }));
-const readMilestone = async (gid, mid) => JSON.parse(await ro.readContract({ address: ADDR, functionName: 'get_milestone', args: [gid, mid] }));
+const readGrant = async (id) => JSON.parse(await readWithRetry(() => ro.readContract({ address: ADDR, functionName: 'get_grant', args: [id] }), `grant ${id}`));
+const readMilestone = async (gid, mid) => JSON.parse(await readWithRetry(() => ro.readContract({ address: ADDR, functionName: 'get_milestone', args: [gid, mid] }), `milestone ${gid}/${mid}`));
+const readWithRetry = async (fn, what) => {
+  for (let i = 0; i < 8; i++) {
+    try { return await fn(); }
+    catch (e) {
+      if (!isTransportError(e)) throw e;
+      log(`  transport error reading ${what}, retry ${i + 1}/8`);
+      await sleep(15000);
+    }
+  }
+  throw new Error(`read ${what}: RPC still failing after 8 retries`);
+};
 // After a jury tx is ACCEPTED, the verdict can lag in readable state -- poll until it lands.
-const waitForVerdict = async (gid, mid, timeoutMs = 600000) => {
+const waitForVerdict = async (gid, mid, timeoutMs = 1200000) => {
   const start = Date.now();
+  let waited = 0;
   while (Date.now() - start < timeoutMs) {
     const m = await readMilestone(gid, mid);
     if (m.verdict !== null || m.status !== 'SUBMITTED') return m;
-    await new Promise(r => setTimeout(r, 10000));
+    await new Promise(r => setTimeout(r, 15000));
+    waited += 15;
+    if (waited % 120 === 0) log(`  ... still waiting for jury verdict (${waited / 60} min)`);
   }
   return await readMilestone(gid, mid);
 };
 const ev = (summary, links = []) => JSON.stringify({ summary, links });
 const ms = (spec, gen) => ({ spec, amount_wei: (gen).toString() });
+
+// Fund the outsider wallet for S13 gas BEFORE snapshots so payout accounting stays exact.
+let h = await A.sendTransaction({ to: strangerAcct.address, value: GEN / 20n });
+await wait(A, h); results.txs.fund_outsider = h;
 
 const balA0 = await bal(grantorAcct.address); const balB0 = await bal(builderAcct.address);
 log('grantor start GEN:', Number(balA0) / 1e18, '| builder start GEN:', Number(balB0) / 1e18);
@@ -57,7 +126,7 @@ const ps0 = JSON.parse(await ro.readContract({ address: ADDR, functionName: 'get
 step('protocol_state', ps0.grant_count === '0' && ps0.paused === false, JSON.stringify(ps0));
 
 // ---- Scenario 1: happy path, 3 tranches ---------------------------------
-let h = await A.writeContract({ address: ADDR, functionName: 'create_grant', args: [builderAcct.address, 'Website rebuild grant', JSON.stringify([
+h = await A.writeContract({ address: ADDR, functionName: 'create_grant', args: [builderAcct.address, 'Website rebuild grant', JSON.stringify([
   ms('Deploy the marketing website to production hosting and share the live URL. The site must load the homepage, about page, and contact form.', GEN / 2n),
   ms('Publish the project documentation to a public GitHub repository and share the repo URL. The repo must contain a README, an API reference, and a changelog.', GEN / 2n),
   ms('Deliver the final launch report (PDF) and share a download link. The report must cover the full rollout and show the product working end to end.', GEN / 2n),
@@ -69,7 +138,7 @@ step('s1_create', g0.status === 'FUNDED' && g0.milestones.length === 3, `status=
 const s1evidence = [
   ev('Deployed the marketing site to https://example-grant-site.io - homepage, about page, and contact form all loading. DNS propagated, SSL active.', ['https://example-grant-site.io']),
   ev('Docs published at https://github.com/example-org/project-docs - README, API reference, and CHANGELOG.md all committed.', ['https://github.com/example-org/project-docs']),
-  ev('Final demo delivered: 84-second MP4 at https://files.example.org/demo-final.mp4 showing the full product flow from signup to checkout.', ['https://files.example.org/demo-final.mp4']),
+  ev('Final launch report delivered: 28-page PDF at https://files.example.org/launch-report-final.pdf covering the full rollout — timeline, metrics, and the product shown working end to end from signup to checkout.', ['https://files.example.org/launch-report-final.pdf']),
 ];
 let s1ok = true;
 for (let m = 0; m < 3; m++) {
@@ -261,14 +330,41 @@ const v12 = await waitForVerdict(7, 0);
 step('s12_antigaming', v12.verdict?.met === false && v12.paid_wei === '0',
   `unrelated links -> NOT_MET score=${v12.verdict?.score}, nothing paid (anti-gaming holds)`);
 
-// ---- Cleanup: grantor cancels the leftover test grants (2,3,5,7) ------------------------
-for (const gid of [2, 3, 5, 7]) {
+// ---- Scenario 13: outsider cannot trigger assessment or release -----------------------
+h = await A.writeContract({ address: ADDR, functionName: 'create_grant', args: [builderAcct.address, 'Outsider gate grant', JSON.stringify([
+  ms('Deliver the signed offsite backup manifest and share the download link.', GEN / 4n),
+])], value: GEN / 4n });
+await wait(A, h); results.txs.s13_create = h;
+h = await B.writeContract({ address: ADDR, functionName: 'submit_evidence', args: [8, ev('Backup manifest delivered: signed PDF at https://files.example.org/backup-manifest.pdf.', ['https://files.example.org/backup-manifest.pdf'])] });
+await wait(B, h);
+h = await C.writeContract({ address: ADDR, functionName: 'assess_milestone', args: [8] });
+results.txs.s13_assess = h;
+const r13a = await wait(C, h);
+const s13aBlocked = execResult(r13a) === 'ERROR' && JSON.stringify(r13a).includes('ONLY_PARTY_ASSESS');
+h = await C.writeContract({ address: ADDR, functionName: 'release_tranche', args: [8] });
+results.txs.s13_release = h;
+const r13b = await wait(C, h);
+const s13bBlocked = execResult(r13b) === 'ERROR' && JSON.stringify(r13b).includes('ONLY_PARTY_RELEASE');
+const m13 = await readMilestone(8, 0);
+step('s13_outsider_gates', s13aBlocked && s13bBlocked && m13.status === 'SUBMITTED' && m13.verdict === null && m13.paid_wei === '0',
+  `outsider assess -> ONLY_PARTY_ASSESS, outsider release -> ONLY_PARTY_RELEASE, milestone still SUBMITTED, nothing paid`);
+
+// ---- Cleanup: grantor cancels the leftover test grants (2,3,5,7,8) ------------------------
+for (const gid of [2, 3, 5, 7, 8]) {
   h = await A.writeContract({ address: ADDR, functionName: 'cancel_grant', args: [gid] });
   results.txs[`cleanup_${gid}`] = h; await wait(A, h);
 }
-const psEnd = JSON.parse(await ro.readContract({ address: ADDR, functionName: 'get_protocol_overview', args: [] }));
+// S7's reverted 1.0 GEN stays in the contract balance (GenVM rolls back storage
+// on UserError, not EVM value) — poll until the balance settles to exactly that.
+let psEnd = null;
+for (let i = 0; i < 30; i++) {
+  const ps = JSON.parse(await ro.readContract({ address: ADDR, functionName: 'get_protocol_overview', args: [] }));
+  if (ps.contract_balance_wei === GEN.toString()) { psEnd = ps; break; }
+  await new Promise(r => setTimeout(r, 20000));
+}
+if (!psEnd) psEnd = JSON.parse(await ro.readContract({ address: ADDR, functionName: 'get_protocol_overview', args: [] }));
 const hist = JSON.parse(await ro.readContract({ address: ADDR, functionName: 'get_activity_history', args: [200] }));
-step('cleanup', psEnd.contract_balance_wei === '0', `leftover grants cancelled, contract_balance_wei=${psEnd.contract_balance_wei}, history_events=${hist.length}`);
+step('cleanup', psEnd.contract_balance_wei === GEN.toString(), `leftover grants cancelled, contract_balance_wei=${psEnd.contract_balance_wei} (S7 residual), history_events=${hist.length}`);
 results.finalState = psEnd;
 
 mkdirSync('./results', { recursive: true });

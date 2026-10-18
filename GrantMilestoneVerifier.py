@@ -62,9 +62,9 @@ class GrantMilestoneVerifier(gl.Contract):
     owner: str
     protocol_paused: bool          # owner-only emergency stop -- never auto-set
     grant_count: bigint
-    grants: TreeMap[bigint, str]            # grant id -> JSON
+    grants: TreeMap[str, str]              # grant id -> JSON
     party_grants: TreeMap[str, str]        # address (lowercase hex) -> JSON list of grant ids
-    verdict_history: TreeMap[bigint, str]  # activity log (capped)
+    verdict_history: TreeMap[str, str]    # activity log (capped)
     activity_count: bigint
     total_assessed: bigint
 
@@ -79,17 +79,17 @@ class GrantMilestoneVerifier(gl.Contract):
 
     # -- internal helpers -------------------------------------------------
     def _load(self, grant_id: bigint):
-        gid = bigint(grant_id)
+        gid = str(int(grant_id))
         if gid not in self.grants:
             raise gl.vm.UserError("GRANT_NOT_FOUND")
         return gid, json.loads(self.grants[gid])
 
-    def _save(self, gid: bigint, data: dict) -> None:
-        self.grants[gid] = json.dumps(data)
+    def _save(self, gid, data: dict) -> None:
+        self.grants[str(int(gid))] = json.dumps(data)
 
     def _log(self, payload: dict) -> None:
         self.activity_count += 1
-        self.verdict_history[self.activity_count] = json.dumps(payload)
+        self.verdict_history[str(int(self.activity_count))] = json.dumps(payload)
 
     def _index_party(self, addr: str, gid: bigint) -> None:
         addr = addr.lower()
@@ -232,6 +232,9 @@ class GrantMilestoneVerifier(gl.Contract):
         if self.protocol_paused:
             raise gl.vm.UserError("PROTOCOL_PAUSED: owner has engaged the emergency stop")
         gid, data = self._load(grant_id)
+        sender = self._sender()
+        if sender != data["grantor"] and sender != data["builder"]:
+            raise gl.vm.UserError("ONLY_PARTY_ASSESS: only the grantor or builder can trigger assessment")
         if data["status"] != "FUNDED":
             raise gl.vm.UserError("BAD_STATUS: grant is not active")
         mid = int(data["current_milestone"])
@@ -311,6 +314,9 @@ class GrantMilestoneVerifier(gl.Contract):
     @gl.public.write
     def release_tranche(self, grant_id: bigint) -> str:
         gid, data = self._load(grant_id)
+        sender = self._sender()
+        if sender != data["grantor"] and sender != data["builder"]:
+            raise gl.vm.UserError("ONLY_PARTY_RELEASE: only the grantor or builder can release the tranche")
         if data["status"] != "FUNDED":
             raise gl.vm.UserError("BAD_STATUS: grant is not active")
         mid = int(data["current_milestone"])
@@ -383,14 +389,14 @@ class GrantMilestoneVerifier(gl.Contract):
     # -- views ------------------------------------------------------------
     @gl.public.view
     def get_grant(self, grant_id: bigint) -> str:
-        gid = bigint(grant_id)
+        gid = str(int(grant_id))
         if gid not in self.grants:
             return "NOT_FOUND"
         return self.grants[gid]
 
     @gl.public.view
     def get_milestone(self, grant_id: bigint, milestone_id: bigint) -> str:
-        gid = bigint(grant_id)
+        gid = str(int(grant_id))
         if gid not in self.grants:
             return "NOT_FOUND"
         data = json.loads(self.grants[gid])
@@ -401,7 +407,7 @@ class GrantMilestoneVerifier(gl.Contract):
 
     @gl.public.view
     def get_verdict(self, grant_id: bigint) -> str:
-        gid = bigint(grant_id)
+        gid = str(int(grant_id))
         if gid not in self.grants:
             return "NOT_FOUND"
         data = json.loads(self.grants[gid])
@@ -418,7 +424,7 @@ class GrantMilestoneVerifier(gl.Contract):
             return "[]"
         out = []
         for gid in json.loads(self.party_grants[party]):
-            out.append(json.loads(self.grants[bigint(gid)]))
+            out.append(json.loads(self.grants[str(int(gid))]))
         return json.dumps(out)
 
     @gl.public.view
@@ -429,7 +435,7 @@ class GrantMilestoneVerifier(gl.Contract):
         start = max(1, total - limit + 1)
         out = []
         for i in range(start, total + 1):
-            out.append(json.loads(self.verdict_history[bigint(i)]))
+            out.append(json.loads(self.verdict_history[str(i)]))
         return json.dumps(out)
 
     @gl.public.view
