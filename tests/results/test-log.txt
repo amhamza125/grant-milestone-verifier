@@ -1,0 +1,21 @@
+grantor start GEN: 87.5 | builder start GEN: 4
+[PASS] protocol_state :: {"paused":false,"owner":"0xd2af69bb67d446526661a80a280820599c601ed3","grant_count":"0","total_assessed":"0","contract_balance_wei":"0"}
+[PASS] s1_create :: status=FUNDED milestones=3
+  s1 milestone 0: met=true score=95 status=APPROVED
+  s1 milestone 1: met=true score=90 status=APPROVED
+  s1 milestone 2: met=true score=100 status=APPROVED
+[PASS] s1_happy_path :: all MET, all paid 0.5 GEN, grant=COMPLETE
+[PASS] s2_notmet :: verdict NOT_MET score=2, milestone back to OPEN, escrow untouched
+[PASS] s2_resubmit_met :: resubmission MET, 0.5 GEN paid, grant=COMPLETE
+[PASS] s3_injection :: exec=SUCCESS met=false paid=0 (injection defeated: no MET, no payout)
+[PASS] s4_only_builder :: grantor submit -> execution_result=ERROR, milestone still OPEN
+[PASS] s5_only_grantor :: builder cancel -> execution_result=ERROR, grant still FUNDED
+[PASS] s6_cancel_midgrant :: tranche 0 paid 0.5 GEN kept, unclaimed 0.5 GEN refunded, grant=CANCELLED
+[PASS] s7_escrow_mismatch :: 0.5 GEN milestones + 1.0 GEN sent -> rejected, grant_count still 5
+[PASS] s8_double_submit :: second submit while SUBMITTED -> execution_result=ERROR
+[PASS] s9_release_no_verdict :: release on SUBMITTED milestone -> execution_result=ERROR, nothing paid
+[PASS] s10_pause_gate :: submit while paused -> ERROR; after resume: MET, 0.25 GEN paid, grant=COMPLETE
+[PASS] s11_owner_transfer :: owner->builder, builder pauses, old owner blocked, builder resumes + transfers back
+[PASS] s12_antigaming :: unrelated links -> NOT_MET score=2, nothing paid (anti-gaming holds)
+[FAIL] cleanup :: leftover grants cancelled, contract_balance_wei=2000000000000000000, history_events=44
+DONE: 15/16 scenarios passed

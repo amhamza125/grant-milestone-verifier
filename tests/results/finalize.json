@@ -1,0 +1,28 @@
+{
+  "payouts_ok": true,
+  "grantor_before": "87.5000",
+  "grantor_after": "83.7500",
+  "grantor_expected": "83.7500",
+  "builder_before": "4.0000",
+  "builder_after": "6.7500",
+  "builder_expected": "6.7500",
+  "escrow_total_gen": "5.0000",
+  "builder_paid_gen": "2.7500",
+  "grantor_refunded_gen": "2.2500",
+  "s7_reverted_value_gen": "1.0000",
+  "contract_balance_wei": "1000000000000000000",
+  "expected_contract_balance_wei": "1000000000000000000",
+  "tx_statuses": {
+    "0x838c48576c6c4a9bb437908545fa30f4b22d444ba40ba2833b6e63352cec059f": "FINALIZED",
+    "0xf349b34889c184df3b0f9df22ff129217e769f67a02a12094054108b152fb3df": "FINALIZED",
+    "0x6ed4277951303b08570f383c30d2dc0dbd5c23c5a959689f3118a8ef3173f31b": "FINALIZED",
+    "0x225da33c72d01dc511afa0ca41864124b796ad0ff8a0753fdaab7e14b7a09668": "FINALIZED",
+    "0x7e692538f7c0978cd9efbef03299af37194d458194b55f3f98ab2274b6b66e62": "FINALIZED",
+    "0xf21404de0fb2648b7ac895ed685b7471c7d35f9402b9f8cc27a57d16cf64000c": "FINALIZED",
+    "0xfa83689885d693d6670448288de3ac44b27a07168eaf07ae661427f3b3871df5": "FINALIZED",
+    "0x0bbb7b84242d6deaf68c556ce7b99ed769f1433d66fd46c5eb8246b1f93ffe5a": "FINALIZED",
+    "0xecd29204551c7da53e45fb2969886ca318004eef037ae7f356fc306dfe610d96": "FINALIZED",
+    "0x8406c3dd22f3c690b91488de5b443944ac31d95f35a947f138af732f6bc2919f": "FINALIZED",
+    "0x2119f546807dd02dcf7824aef070fa41e81ca04ebe775af4c2061508d0abbfb1": "FINALIZED"
+  }
+}
