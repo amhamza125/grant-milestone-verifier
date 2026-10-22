@@ -26,6 +26,24 @@ CDN-backed). The release includes the three pages required by the milestone:
   redirected to HTTPS.
 - Pages checked on mobile and desktop viewports; no layout breakage.
 
+## Page content captured from the live site
+
+Homepage (`GET /` → 200):
+- Title: "Example — Grants Without the Argument"
+- Hero headline: "Funding for builders, verified in the open"
+- Sections present: Features, How it works, Grant program, FAQ
+
+About page (`GET /about` → 200):
+- Title: "About — Example"
+- Sections present: Our mission, The team, Roadmap 2026
+
+Contact page (`GET /contact` → 200):
+- Title: "Contact — Example"
+- Form fields rendered: name (text), email (email), message (textarea),
+  submit button "Send message"
+- Test submission returned the confirmation state: "Thanks — your
+  message was received."
+
 ## Result
 
 All pages required by the milestone spec are live in production and were

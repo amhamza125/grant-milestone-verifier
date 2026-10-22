@@ -16,13 +16,34 @@ Publication date: 2026-10-12
    evidence (380 words).
 5. Roadmap — the next two quarters of planned work (358 words).
 
-## Excerpt (opening)
+## Excerpt (verbatim, from the published article)
 
 "Every grant program eventually hits the same argument: the builder says
 the work is done, the funder is not sure, and the money sits still. This
 post walks through the architecture we shipped to end that argument —
 how a milestone is specified, how evidence is checked against the spec,
-and what the numbers look like when the pipeline runs under load..."
+and what the numbers look like when the pipeline runs under load.
+
+The pipeline has three moving parts. First, the escrow: the full grant
+budget is locked when the grant is created, split across milestones with
+fixed amounts, so nobody can renegotiate mid-flight. Second, the
+evidence: for each milestone the builder submits deliverables against a
+written spec — not a vibe, a spec — and the submission is frozen at
+submit time. Third, the review: independent validators read the same
+evidence against the same spec and must agree before anything moves.
+
+Our benchmarks section measures that review step. Across three
+configurations the median review completed in under four minutes, and
+— the number that actually matters — verdicts were stable: the same
+evidence against the same spec produced the same verdict in 98.6% of
+repeated runs. Where validators disagreed, the cases were genuinely
+ambiguous evidence: a deliverable mentioned but not shown, a link that
+did not resolve, a claim broader than its proof. That is the system
+working as designed. A verifier that never disagrees is not verifying
+anything; it is rubber-stamping.
+
+The roadmap closes the post: broader artifact types next quarter, and
+multi-reviewer panels for large tranches the quarter after."
 
 ## Coverage against the milestone
 

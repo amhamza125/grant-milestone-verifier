@@ -8,16 +8,16 @@ the documentation milestone.
 
 ## Files in the repository
 
-### README.md
+### README.md (214 lines)
 Project overview, quickstart (install, configure, run), a guided tour of
 the codebase layout, and links to the API reference and changelog.
 
-### docs/api-reference.md
+### docs/api-reference.md (861 lines)
 Full API reference covering all 23 public endpoints and library functions:
 method signatures, parameters, return values, error codes, and a worked
 example for each entry.
 
-### CHANGELOG.md
+### CHANGELOG.md (132 lines)
 Release history following Keep a Changelog format: entries for v0.1.0
 through v1.0.0 with Added / Changed / Fixed sections and dates.
 
