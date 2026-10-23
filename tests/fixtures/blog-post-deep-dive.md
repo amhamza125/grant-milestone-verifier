@@ -45,6 +45,17 @@ anything; it is rubber-stamping.
 The roadmap closes the post: broader artifact types next quarter, and
 multi-reviewer panels for large tranches the quarter after."
 
+## Excerpt (verbatim, closing section — Roadmap)
+
+"Next quarter we widen what counts as evidence: signed build artifacts,
+repository snapshots, and rendered documents join plain links, each
+fetched and hashed at review time so the verdict names the exact bytes
+it rested on. The quarter after, large tranches get multi-reviewer
+panels — three independent verdicts, agreement required — because the
+bigger the payout, the more eyes it deserves. The goal never changes:
+when the money moves, everyone can point at the same evidence and the
+same spec, and the argument is already over."
+
 ## Coverage against the milestone
 
 - Topic: the project (architecture, benchmarks, roadmap) — yes.
