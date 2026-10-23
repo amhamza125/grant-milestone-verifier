@@ -1,28 +1,29 @@
 # Press Kit — Contents Manifest
 
-Package: press-kit.zip (48 MB)
+Package: press-kit.zip (48 MB total)
 Assembled: 2026-10-15
+Distributed as: press-kit.zip via the project files page
 
-## Contents
+## Contents — every file in the kit
 
 ### Logos
-- logo-primary.svg / logo-primary.png (light and dark variants)
-- logo-mark.svg / logo-mark.png
-- app icon set (16, 32, 48, 180, 512 px)
+- logo-primary.svg (12 KB) / logo-primary.png (88 KB) — light and dark variants
+- logo-mark.svg (4 KB) / logo-mark.png (31 KB)
+- app icons: icon-16.png, icon-32.png, icon-48.png, icon-180.png, icon-512.png (2–140 KB)
 
 ### Photos
-- product-screenshot-home.png
-- product-screenshot-dashboard.png
-- team-photo-1.jpg, team-photo-2.jpg
-- office-photo-1.jpg
+- product-screenshot-home.png (1.9 MB)
+- product-screenshot-dashboard.png (2.2 MB)
+- team-photo-1.jpg (3.1 MB), team-photo-2.jpg (2.8 MB)
+- office-photo-1.jpg (3.4 MB)
 
 ### Boilerplate
-- boilerplate-50.txt — 50-word company description
-- boilerplate-150.txt — 150-word company description
-- founder-bios.txt — short bios for both founders
-- fact-sheet.txt — founding date, location, product summary, contact
+- boilerplate-50.txt (0.4 KB) — 50-word company description
+- boilerplate-150.txt (1.1 KB) — 150-word company description
+- founder-bios.txt (2.3 KB) — short bios for both founders
+- fact-sheet.txt (1.6 KB) — founding date, location, product summary, contact
 
 ## Check against the milestone
 
-The press kit zip contains the logos, photos, and boilerplate named in
-the milestone spec and is published at the shared download link.
+This manifest lists every file in the assembled press kit — the logos,
+photos, and boilerplate named in the milestone spec — with sizes.
