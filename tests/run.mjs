@@ -5,10 +5,13 @@
 // The suite expects a FRESH GrantMilestoneVerifier deployment (grant ids start at 0).
 //
 // Wallets: A = grantor/deployer/owner, B = builder, C = outsider (not a party to any grant).
-// 13 scenarios: happy path, NOT_MET+resubmit, adversarial verdict handling,
+// 17 scenarios: happy path, NOT_MET+resubmit, adversarial verdict handling,
 // sender-bound evidence, sender-bound cancel, mid-grant cancel, escrow mismatch,
 // double submission, release-without-verdict, pause gate, owner transfer,
-// anti-gaming (links without spec coverage), outsider assessment/release gates.
+// anti-gaming (links without spec coverage), outsider assessment/release gates,
+// plus the evidence-grounding scenarios G1-G4: the contract fetches the linked
+// artifacts itself, so verdict evidence uses real hosted fixture artifacts
+// (tests/fixtures/ in this repo, served over raw.githubusercontent.com).
 import { createClient } from 'genlayer-js';
 import { studionet } from 'genlayer-js/chains';
 import { privateKeyToAccount } from 'viem/accounts';
@@ -81,8 +84,32 @@ const GEN = 10n ** 18n;
 const results = { contract: ADDR, grantor: grantorAcct.address, builder: builderAcct.address, outsider: strangerAcct.address, steps: [], txs: {} };
 const log = (...a) => console.log(...a);
 const step = (name, pass, info) => { results.steps.push({ name, pass, info }); log(`[${pass ? 'PASS' : 'FAIL'}] ${name} :: ${info}`); };
-const bal = async (a) => { const r = await fetch('https://studio.genlayer.com/api', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_getBalance', params: [a, 'latest'] }) }); return BigInt((await r.json()).result); };
-const wait = (client, hash) => client.waitForTransactionReceipt({ hash, status: 'ACCEPTED', retries: 240, interval: 5000 });
+const bal = async (a) => {
+  for (let i = 0; i < 8; i++) {
+    try {
+      const r = await fetch('https://studio.genlayer.com/api', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_getBalance', params: [a, 'latest'] }) });
+      return BigInt((await r.json()).result);
+    } catch (e) {
+      if (!isTransportError(e) && i > 0) throw e;
+      log(`  transport error reading balance, retry ${i + 1}/8`);
+      await sleep(15000);
+    }
+  }
+  throw new Error('bal: RPC still failing after 8 retries');
+};
+// Receipt polling is idempotent, so transport failures (the RPC endpoint
+// intermittently returns a proxy HTML page) are retried instead of crashing.
+const wait = async (client, hash) => {
+  for (let i = 0; i < 10; i++) {
+    try { return await client.waitForTransactionReceipt({ hash, status: 'ACCEPTED', retries: 240, interval: 5000 }); }
+    catch (e) {
+      if (!isTransportError(e)) throw e;
+      log(`  transport error waiting for receipt, retry ${i + 1}/10 in 20s`);
+      await sleep(20000);
+    }
+  }
+  throw new Error('waitForTransactionReceipt: RPC still failing after 10 retries');
+};
 const execResult = (r) => r.consensus_data?.leader_receipt?.[0]?.execution_result;
 const readGrant = async (id) => JSON.parse(await readWithRetry(() => ro.readContract({ address: ADDR, functionName: 'get_grant', args: [id] }), `grant ${id}`));
 const readMilestone = async (gid, mid) => JSON.parse(await readWithRetry(() => ro.readContract({ address: ADDR, functionName: 'get_milestone', args: [gid, mid] }), `milestone ${gid}/${mid}`));
@@ -98,7 +125,7 @@ const readWithRetry = async (fn, what) => {
   throw new Error(`read ${what}: RPC still failing after 8 retries`);
 };
 // After a jury tx is ACCEPTED, the verdict can lag in readable state -- poll until it lands.
-const waitForVerdict = async (gid, mid, timeoutMs = 1200000) => {
+const waitForVerdict = async (gid, mid, timeoutMs = 3600000) => {
   const start = Date.now();
   let waited = 0;
   while (Date.now() - start < timeoutMs) {
@@ -112,6 +139,9 @@ const waitForVerdict = async (gid, mid, timeoutMs = 1200000) => {
 };
 const ev = (summary, links = []) => JSON.stringify({ summary, links });
 const ms = (spec, gen) => ({ spec, amount_wei: (gen).toString() });
+// Hosted evidence fixtures — the contract fetches these artifacts itself at
+// assessment time (contract-side evidence acquisition + grounding).
+const FX = 'https://raw.githubusercontent.com/amhamza125/grant-milestone-verifier/main/tests/fixtures/';
 
 // Fund the outsider wallet for S13 gas BEFORE snapshots so payout accounting stays exact.
 let h = await A.sendTransaction({ to: strangerAcct.address, value: GEN / 20n });
@@ -127,18 +157,18 @@ step('protocol_state', ps0.grant_count === '0' && ps0.paused === false, JSON.str
 
 // ---- Scenario 1: happy path, 3 tranches ---------------------------------
 h = await A.writeContract({ address: ADDR, functionName: 'create_grant', args: [builderAcct.address, 'Website rebuild grant', JSON.stringify([
-  ms('Deploy the marketing website to production hosting and share the live URL. The site must load the homepage, about page, and contact form.', GEN / 2n),
-  ms('Publish the project documentation to a public GitHub repository and share the repo URL. The repo must contain a README, an API reference, and a changelog.', GEN / 2n),
-  ms('Deliver the final launch report (PDF) and share a download link. The report must cover the full rollout and show the product working end to end.', GEN / 2n),
+  ms('Deploy the marketing website to production hosting and share the live URL. The site must load the homepage, about page, and contact form. Deliver a deployment report documenting the live URL and verifying each of the three pages.', GEN / 2n),
+  ms('Publish the project documentation to a public repository and share it. The documentation must contain a README, an API reference covering the public endpoints, and a changelog.', GEN / 2n),
+  ms('Deliver the final launch report and share it. The report must cover the full rollout and show the product working end to end.', GEN / 2n),
 ])], value: GEN * 3n / 2n });
 await wait(A, h); results.txs.s1_create = h;
 let g0 = await readGrant(0);
 step('s1_create', g0.status === 'FUNDED' && g0.milestones.length === 3, `status=${g0.status} milestones=${g0.milestones.length}`);
 
 const s1evidence = [
-  ev('Deployed the marketing site to https://example-grant-site.io - homepage, about page, and contact form all loading. DNS propagated, SSL active.', ['https://example-grant-site.io']),
-  ev('Docs published at https://github.com/example-org/project-docs - README, API reference, and CHANGELOG.md all committed.', ['https://github.com/example-org/project-docs']),
-  ev('Final launch report delivered: 28-page PDF at https://files.example.org/launch-report-final.pdf covering the full rollout — timeline, metrics, and the product shown working end to end from signup to checkout.', ['https://files.example.org/launch-report-final.pdf']),
+  ev('Marketing site deployed to production. Deployment report with the live checks for the homepage, about page, and contact form: ' + FX + 'website-deployment-report.md', [FX + 'website-deployment-report.md']),
+  ev('Documentation published to the public repository — the full published documentation (README, API reference, changelog): ' + FX + 'project-documentation.md', [FX + 'project-documentation.md']),
+  ev('Final launch report delivered (28 pages), covering the full rollout — timeline, metrics, and the product shown working end to end from signup to checkout: ' + FX + 'launch-report.md', [FX + 'launch-report.md']),
 ];
 let s1ok = true;
 for (let m = 0; m < 3; m++) {
@@ -161,7 +191,7 @@ h = await A.writeContract({ address: ADDR, functionName: 'create_grant', args: [
   ms('Write a 2000-word technical blog post about the project and publish the URL.', GEN / 2n),
 ])], value: GEN / 2n });
 await wait(A, h); results.txs.s2_create = h;
-h = await B.writeContract({ address: ADDR, functionName: 'submit_evidence', args: [1, ev('work done, trust me')] });
+h = await B.writeContract({ address: ADDR, functionName: 'submit_evidence', args: [1, ev('work done, trust me', [FX + 'status-note.txt'])] });
 await wait(B, h);
 h = await B.writeContract({ address: ADDR, functionName: 'assess_milestone', args: [1] });
 results.txs.s2_assess_vague = h; await wait(B, h);
@@ -169,7 +199,7 @@ let v2 = await waitForVerdict(1, 0);
 const balAfterVague = await bal(ADDR);
 step('s2_notmet', v2.verdict?.met === false && v2.status === 'OPEN' && v2.paid_wei === '0',
   `verdict NOT_MET score=${v2.verdict?.score}, milestone back to OPEN, escrow untouched`);
-h = await B.writeContract({ address: ADDR, functionName: 'submit_evidence', args: [1, ev('Published the 2000-word technical deep-dive at https://blog.example.org/grant-post-1 - covers architecture, benchmarks, and roadmap.', ['https://blog.example.org/grant-post-1'])] });
+h = await B.writeContract({ address: ADDR, functionName: 'submit_evidence', args: [1, ev('Published the 2000-word technical deep-dive at https://blog.example.org/grant-post-1 — covers architecture, benchmarks, and roadmap. Published-article record naming the published URL, with word count, structure, and verbatim excerpts: ' + FX + 'blog-post-deep-dive.md', [FX + 'blog-post-deep-dive.md'])] });
 await wait(B, h);
 h = await B.writeContract({ address: ADDR, functionName: 'assess_milestone', args: [1] });
 results.txs.s2_assess_good = h; await wait(B, h);
@@ -226,7 +256,7 @@ h = await A.writeContract({ address: ADDR, functionName: 'create_grant', args: [
   ms('Phase two: deliver the API server code and share the repo.', GEN / 2n),
 ])], value: GEN });
 await wait(A, h); results.txs.s6_create = h;
-h = await B.writeContract({ address: ADDR, functionName: 'submit_evidence', args: [4, ev('Schema delivered: full PostgreSQL DDL at https://files.example.org/schema-v1.sql - 14 tables, indexes, seed data.', ['https://files.example.org/schema-v1.sql'])] });
+h = await B.writeContract({ address: ADDR, functionName: 'submit_evidence', args: [4, ev('Schema delivered: full PostgreSQL DDL — 14 tables, indexes, seed data: ' + FX + 'database-schema.sql', [FX + 'database-schema.sql'])] });
 await wait(B, h);
 h = await B.writeContract({ address: ADDR, functionName: 'assess_milestone', args: [4] });
 results.txs.s6_assess = h; await wait(B, h);
@@ -275,7 +305,7 @@ step('s9_release_no_verdict', execResult(r9) === 'ERROR' && m5.paid_wei === '0',
 
 // ---- Scenario 10: pause gate -------------------------------------------------------
 h = await A.writeContract({ address: ADDR, functionName: 'create_grant', args: [builderAcct.address, 'Pause gate grant', JSON.stringify([
-  ms('Deliver the press kit zip file and share the download link.', GEN / 4n),
+  ms('Assemble the press kit (logos, photos, boilerplate) and publish a contents manifest for it. The manifest must list every file included in the kit, with sizes.', GEN / 4n),
 ])], value: GEN / 4n });
 await wait(A, h); results.txs.s10_create = h;
 h = await A.writeContract({ address: ADDR, functionName: 'set_paused', args: [true] });
@@ -286,7 +316,7 @@ const r10 = await wait(B, h);
 const s10blocked = execResult(r10) === 'ERROR';
 h = await A.writeContract({ address: ADDR, functionName: 'set_paused', args: [false] });
 await wait(A, h); results.txs.s10_resume = h;
-h = await B.writeContract({ address: ADDR, functionName: 'submit_evidence', args: [6, ev('Press kit delivered: 48MB zip at https://files.example.org/press-kit.zip - logos, photos, boilerplate.', ['https://files.example.org/press-kit.zip'])] });
+h = await B.writeContract({ address: ADDR, functionName: 'submit_evidence', args: [6, ev('Press kit delivered: 48MB zip — logos, photos, boilerplate. Contents manifest: ' + FX + 'press-kit-contents.md', [FX + 'press-kit-contents.md'])] });
 await wait(B, h);
 h = await B.writeContract({ address: ADDR, functionName: 'assess_milestone', args: [6] });
 results.txs.s10_assess = h; await wait(B, h);
@@ -322,7 +352,7 @@ h = await A.writeContract({ address: ADDR, functionName: 'create_grant', args: [
   ms('Publish the security audit report PDF to IPFS and share the CID. The report must cover the token contract and the escrow contract.', GEN / 4n),
 ])], value: GEN / 4n });
 await wait(A, h); results.txs.s12_create = h;
-h = await B.writeContract({ address: ADDR, functionName: 'submit_evidence', args: [7, ev('Here is my blog post about DeFi trends this quarter.', ['https://example.com/defi-trends', 'https://example.com/market-notes'])] });
+h = await B.writeContract({ address: ADDR, functionName: 'submit_evidence', args: [7, ev('Here is my blog post about DeFi trends this quarter.', [FX + 'defi-trends-post.md', FX + 'market-notes.md'])] });
 await wait(B, h);
 h = await B.writeContract({ address: ADDR, functionName: 'assess_milestone', args: [7] });
 results.txs.s12_assess = h; await wait(B, h);
@@ -335,7 +365,7 @@ h = await A.writeContract({ address: ADDR, functionName: 'create_grant', args: [
   ms('Deliver the signed offsite backup manifest and share the download link.', GEN / 4n),
 ])], value: GEN / 4n });
 await wait(A, h); results.txs.s13_create = h;
-h = await B.writeContract({ address: ADDR, functionName: 'submit_evidence', args: [8, ev('Backup manifest delivered: signed PDF at https://files.example.org/backup-manifest.pdf.', ['https://files.example.org/backup-manifest.pdf'])] });
+h = await B.writeContract({ address: ADDR, functionName: 'submit_evidence', args: [8, ev('Backup manifest delivered: signed manifest with restore-drill record: ' + FX + 'backup-manifest.md', [FX + 'backup-manifest.md'])] });
 await wait(B, h);
 h = await C.writeContract({ address: ADDR, functionName: 'assess_milestone', args: [8] });
 results.txs.s13_assess = h;
@@ -349,8 +379,94 @@ const m13 = await readMilestone(8, 0);
 step('s13_outsider_gates', s13aBlocked && s13bBlocked && m13.status === 'SUBMITTED' && m13.verdict === null && m13.paid_wei === '0',
   `outsider assess -> ONLY_PARTY_ASSESS, outsider release -> ONLY_PARTY_RELEASE, milestone still SUBMITTED, nothing paid`);
 
-// ---- Cleanup: grantor cancels the leftover test grants (2,3,5,7,8) ------------------------
-for (const gid of [2, 3, 5, 7, 8]) {
+// ---- Scenario G1: grounding — fetched artifact supports the claim -> MET ------------
+h = await A.writeContract({ address: ADDR, functionName: 'create_grant', args: [builderAcct.address, 'Grounding MET grant', JSON.stringify([
+  ms('Deliver the public API server v1.2 with the five REST endpoints (list grants, grant detail, create grant, milestone list, release tranche) and passing integration tests; share the delivery report.', GEN / 2n),
+])], value: GEN / 2n });
+await wait(A, h); results.txs.g1_create = h;
+h = await B.writeContract({ address: ADDR, functionName: 'submit_evidence', args: [9, ev('API server v1.2 delivered — all five endpoints live, integration suite green. Delivery report: ' + FX + 'api-delivery-report.md', [FX + 'api-delivery-report.md'])] });
+await wait(B, h);
+h = await B.writeContract({ address: ADDR, functionName: 'assess_milestone', args: [9] });
+results.txs.g1_assess = h; await wait(B, h);
+const vg1 = await waitForVerdict(9, 0);
+log(`  g1: met=${vg1.verdict?.met} score=${vg1.verdict?.score} grounding=${JSON.stringify(vg1.verdict?.grounding)}`);
+h = await A.writeContract({ address: ADDR, functionName: 'release_tranche', args: [9] });
+results.txs.g1_release = h; await wait(A, h);
+const gg1 = await readGrant(9);
+step('g1_grounded_met', vg1.verdict?.met === true && vg1.verdict?.grounding?.artifacts_fetched === 1
+  && typeof vg1.verdict?.grounding?.primary_sha256 === 'string' && vg1.verdict.grounding.primary_sha256.length === 64
+  && gg1.status === 'COMPLETE' && gg1.milestones[0].paid_wei === (GEN / 2n).toString(),
+  `fetched artifact supports the claim -> MET, grounding receipt recorded (sha256 ${String(vg1.verdict?.grounding?.primary_sha256).slice(0, 12)}...), 0.5 GEN released, grant=${gg1.status}`);
+
+// ---- Scenario G2: grounding — fetched artifact CONTRADICTS the summary -> NOT_MET ---
+h = await A.writeContract({ address: ADDR, functionName: 'create_grant', args: [builderAcct.address, 'Grounding contradiction grant', JSON.stringify([
+  ms('Implement the grant dashboard UI (React) with the grants list, milestone detail, and payout views, deployed to a public URL.', GEN / 4n),
+])], value: GEN / 4n });
+await wait(A, h); results.txs.g2_create = h;
+h = await B.writeContract({ address: ADDR, functionName: 'submit_evidence', args: [10, ev('Dashboard UI fully implemented and deployed — grants list, milestone detail, and payout views all live. Status report: ' + FX + 'ui-implementation-status.md', [FX + 'ui-implementation-status.md'])] });
+await wait(B, h);
+h = await B.writeContract({ address: ADDR, functionName: 'assess_milestone', args: [10] });
+results.txs.g2_assess = h; await wait(B, h);
+const vg2 = await waitForVerdict(10, 0);
+step('g2_contradiction_notmet', vg2.verdict?.met === false && vg2.status === 'OPEN' && vg2.paid_wei === '0',
+  `summary claims full delivery, fetched artifact says wireframes only -> NOT_MET score=${vg2.verdict?.score}, zero release, milestone back to OPEN`);
+
+// ---- Scenario G3: grounding — unreachable evidence fails closed, then re-assess -----
+h = await A.writeContract({ address: ADDR, functionName: 'create_grant', args: [builderAcct.address, 'Grounding unreachable grant', JSON.stringify([
+  ms('Deliver the nightly ETL pipeline that loads warehouse events into the analytics store; share the run report.', GEN / 4n),
+])], value: GEN / 4n });
+await wait(A, h); results.txs.g3_create = h;
+h = await B.writeContract({ address: ADDR, functionName: 'submit_evidence', args: [11, ev('ETL pipeline delivered and running nightly. Run report: ' + FX + 'no-such-artifact-404.txt', [FX + 'no-such-artifact-404.txt'])] });
+await wait(B, h);
+const balBeforeG3 = await bal(ADDR);
+h = await B.writeContract({ address: ADDR, functionName: 'assess_milestone', args: [11] });
+results.txs.g3_assess_dead = h; await wait(B, h);
+const mg3 = await waitForVerdict(11, 0);
+const balAfterG3 = await bal(ADDR);
+step('g3_unreachable_fails_closed', mg3.status === 'OPEN' && mg3.verdict === null && mg3.paid_wei === '0'
+  && mg3.evidence_failures === 1 && mg3.last_evidence_error === 'EVIDENCE_UNREACHABLE' && balBeforeG3 === balAfterG3,
+  `dead link -> EVIDENCE_UNREACHABLE recorded (failures=${mg3.evidence_failures}), no verdict, no release, contract balance unchanged, milestone reopened`);
+h = await B.writeContract({ address: ADDR, functionName: 'submit_evidence', args: [11, ev('ETL pipeline delivered and running nightly — three reconciled runs. Delivery report: ' + FX + 'data-pipeline-report.md', [FX + 'data-pipeline-report.md'])] });
+await wait(B, h);
+h = await B.writeContract({ address: ADDR, functionName: 'assess_milestone', args: [11] });
+results.txs.g3_assess = h; await wait(B, h);
+const vg3 = await waitForVerdict(11, 0);
+h = await A.writeContract({ address: ADDR, functionName: 'release_tranche', args: [11] });
+results.txs.g3_release = h; await wait(A, h);
+const gg3 = await readGrant(11);
+step('g3_reassess_after_fix', vg3.verdict?.met === true && gg3.status === 'COMPLETE' && gg3.milestones[0].paid_wei === (GEN / 4n).toString(),
+  `same milestone re-submitted with a reachable artifact -> MET, 0.25 GEN released, grant=${gg3.status}`);
+
+// ---- Scenario G4: grounding — outsider gates still hold on a grounded grant ---------
+h = await A.writeContract({ address: ADDR, functionName: 'create_grant', args: [builderAcct.address, 'Grounding outsider gate grant', JSON.stringify([
+  ms('Publish the security checklist document for the platform and share the link.', GEN / 4n),
+  ms('Publish the operations runbook and share the link.', GEN / 4n),
+])], value: GEN / 2n });
+await wait(A, h); results.txs.g4_create = h;
+h = await B.writeContract({ address: ADDR, functionName: 'submit_evidence', args: [12, ev('Security checklist published — all items complete: ' + FX + 'security-checklist.md', [FX + 'security-checklist.md'])] });
+await wait(B, h);
+h = await A.writeContract({ address: ADDR, functionName: 'assess_milestone', args: [12] });
+results.txs.g4_assess = h; await wait(A, h);
+const vg4 = await waitForVerdict(12, 0);
+h = await C.writeContract({ address: ADDR, functionName: 'release_tranche', args: [12] });
+results.txs.g4_release_outsider = h;
+const rg4a = await wait(C, h);
+const g4relBlocked = execResult(rg4a) === 'ERROR' && JSON.stringify(rg4a).includes('ONLY_PARTY_RELEASE');
+h = await C.writeContract({ address: ADDR, functionName: 'assess_milestone', args: [12] });
+results.txs.g4_assess_outsider = h;
+const rg4b = await wait(C, h);
+const g4assBlocked = execResult(rg4b) === 'ERROR' && JSON.stringify(rg4b).includes('ONLY_PARTY_ASSESS');
+const mg4 = await readMilestone(12, 0);
+h = await A.writeContract({ address: ADDR, functionName: 'release_tranche', args: [12] });
+results.txs.g4_release = h; await wait(A, h);
+const gg4 = await readGrant(12);
+step('g4_outsider_gates_grounded', vg4.verdict?.met === true && g4relBlocked && g4assBlocked
+  && mg4.status === 'APPROVED' && mg4.paid_wei === '0'
+  && gg4.milestones[0].status === 'VERIFIED' && gg4.milestones[0].paid_wei === (GEN / 4n).toString(),
+  `grounded MET recorded; outsider release -> ONLY_PARTY_RELEASE, outsider assess -> ONLY_PARTY_ASSESS, nothing paid to outsider; grantor then released 0.25 GEN`);
+
+// ---- Cleanup: grantor cancels the leftover test grants (2,3,5,7,8,10,12) ------------
+for (const gid of [2, 3, 5, 7, 8, 10, 12]) {
   h = await A.writeContract({ address: ADDR, functionName: 'cancel_grant', args: [gid] });
   results.txs[`cleanup_${gid}`] = h; await wait(A, h);
 }

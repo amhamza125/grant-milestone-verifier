@@ -18,7 +18,9 @@ const watch = [
   R.txs.s1_release0, R.txs.s1_release1, R.txs.s1_release2,
   R.txs.s2_release, R.txs.s6_release, R.txs.s6_cancel, R.txs.s10_release,
   R.txs.s13_assess, R.txs.s13_release,
+  R.txs.g1_release, R.txs.g3_release, R.txs.g4_release,
   R.txs.cleanup_2, R.txs.cleanup_3, R.txs.cleanup_5, R.txs.cleanup_7, R.txs.cleanup_8,
+  R.txs.cleanup_10, R.txs.cleanup_12,
 ].filter(Boolean);
 const deadline = Date.now() + 25 * 60 * 1000;
 let statuses = {};

@@ -8,6 +8,16 @@ gate, owner transfer, and adversarial cases (prompt injection, sender-bound
 access control, outsider assessment/release gates, escrow mismatch, double
 submission, anti-gaming).
 
+The contract fetches milestone evidence itself at assessment time, so the
+suite's evidence links point at real hosted artifacts: the files in
+`tests/fixtures/` in this repo, served over `raw.githubusercontent.com`.
+Scenarios G1–G4 cover the grounding design directly — a fetched artifact that
+supports the claim (MET, with the verdict recording the artifact's SHA-256),
+a fetched artifact that contradicts the builder's summary (NOT_MET), an
+unreachable evidence link (assessment fails closed with EVIDENCE_UNREACHABLE,
+no verdict, no release, milestone re-opened), and the outsider gates on a
+grounded grant.
+
 ## Run it
 
 ```bash
@@ -31,7 +41,7 @@ node finalize.mjs
   committed to this repo, ever.
 - The suite expects a **fresh** deployment (grant ids start at 0).
 
-`run.mjs` writes `results/results.json` (13 scenarios + every tx hash) and a
+`run.mjs` writes `results/results.json` (17 scenarios + every tx hash) and a
 human-readable `results/test-log.txt`. `finalize.mjs` waits for the payout
 transactions to reach FINALIZED and checks every wei moved exactly as the
 contract recorded, writing `results/finalize.json`.

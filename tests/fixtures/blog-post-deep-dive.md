@@ -1,6 +1,7 @@
 # Published Article — Technical Deep-Dive (Milestone Evidence)
 
 Title: "Inside the Architecture: How the Grant Pipeline Actually Works"
+Published URL: https://blog.example.org/grant-post-1
 Published at: project blog, technical series
 Word count: 2,148 words (counted on the published text)
 Publication date: 2026-10-12

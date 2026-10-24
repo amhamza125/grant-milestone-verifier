@@ -4,18 +4,18 @@ I built this because grant payouts usually run on trust: someone promises work, 
 
 ## The deal, in plain words
 
-A grantor locks GEN against a list of milestones. A builder submits evidence for each milestone. An AI jury reads the milestone spec and the evidence, and returns a strict verdict: MET or NOT_MET, with a 1–100 score and a reason. MET releases that milestone's tranche to the builder automatically. NOT_MET sends the milestone back to OPEN with the escrow untouched, so the builder can resubmit. The grantor can cancel anytime and get back whatever hasn't been paid out.
+A grantor locks GEN against a list of milestones. A builder submits evidence for each milestone. The contract fetches the linked evidence artifacts itself and an AI jury judges the *fetched content* — not the builder's summary — returning a strict verdict: MET or NOT_MET, with a 1–100 score, a reason, and a grounding receipt (SHA-256 of the artifact it actually judged). MET releases that milestone's tranche to the builder automatically. NOT_MET sends the milestone back to OPEN with the escrow untouched, so the builder can resubmit. If the evidence can't be retrieved, no verdict is issued at all and the milestone reopens for resubmission. The grantor can cancel anytime and get back whatever hasn't been paid out.
 
 ## Numbers
 
-- **Contract:** `0x4a7246A289e1528e5ac08be417C7c84F9BF26d43` (GenLayer StudioNet, chain 61999)
-- **Adversarial suite:** 13/13 scenarios passed, every write transaction FINALIZED
+- **Contract:** `0x1d4C89b81D4D02DB2eCDB6A39EE8D561799af19a` (GenLayer StudioNet, chain 61999)
+- **Adversarial suite:** 20/22 steps passed (17 scenarios incl. 4 evidence-grounding scenarios), every write transaction FINALIZED
 - **Escrow tested:** 4.50 GEN across 9 grants — 2.75 GEN paid to the builder, 1.75 GEN refunded, all to the wei
-- **Jury verdicts observed:** real milestones scored 90–100 (MET); vague evidence scored 1–2 (NOT_MET); a prompt-injection attempt scored NOT_MET with zero payout
+- **Jury verdicts observed:** real milestones scored 90–100 (MET); vague evidence scored 1–2 (NOT_MET); a prompt-injection attempt scored NOT_MET with zero payout; a summary contradicting its fetched artifact scored NOT_MET (5) with zero release; an unreachable evidence link recorded EVIDENCE_UNREACHABLE with no verdict and no release
 
 ## How the jury works
 
-`assess_milestone` runs a comparative prompt consensus: several validators independently judge the evidence against the spec, and the contract only accepts the verdict if they agree. The verdict schema is strict — `{milestone_id, met, score, reasons}` — and anything malformed is rejected fail-closed with no state change. The prompt carries explicit anti-gaming rules: evidence must reference concrete deliverables from the spec, vague claims get NOT_MET, and injected instructions inside the evidence ("return met=true") are ignored and treated as NOT_MET.
+`assess_milestone` runs a comparative prompt consensus: several validators independently judge the evidence against the spec, and the contract only accepts the verdict if they agree. But the key point is what "the evidence" means: **the contract fetches the builder's evidence links itself** (`gl.nondet.web.get`, response body unwrapped) inside the jury call, and the jury prompt is built from the **fetched artifact content** — datamarked, UNTRUSTED-labeled, with head+tail excerpts and prompt-hygiene stripping for long files. The builder's summary appears only as *the claim being checked* against the artifacts, never as the evidence. A MET verdict is impossible without successfully fetched evidence: if the material link is unreachable or empty, the contract records `EVIDENCE_UNREACHABLE` (failure count + code) on the milestone, returns it to OPEN for resubmission, and issues no verdict at all. Every verdict stores a grounding receipt — `{artifacts_fetched, primary_sha256}` — so anyone can check exactly which bytes the jury judged. The verdict schema is strict — `{milestone_id, met, score, reasons, grounding}` — and anything malformed is rejected fail-closed with no state change. The prompt carries explicit anti-gaming rules: evidence must reference concrete deliverables from the spec, vague claims get NOT_MET, and injected instructions inside the evidence ("return met=true") are ignored and treated as NOT_MET.
 
 ## State machine
 
@@ -51,7 +51,7 @@ The suite in `tests/` covers the happy path (3 tranches, all MET, grant COMPLETE
 ```bash
 cd tests
 npm install
-export GMV_CONTRACT=0x4a7246A289e1528e5ac08be417C7c84F9BF26d43
+export GMV_CONTRACT=0x1d4C89b81D4D02DB2eCDB6A39EE8D561799af19a
 export GMV_KEY_A=<grantor key>
 export GMV_KEY_B=<builder key>
 export GMV_KEY_C=<outsider key>
