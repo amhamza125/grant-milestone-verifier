@@ -4,17 +4,25 @@ import hashlib
 import json
 # ---------------------------------------------------------------------------
 # Grant Milestone Verifier v1 -- consensus-verified grant payouts (GenLayer)
-# A grantor locks GEN escrow for 1-N milestones. The builder submits an
-# evidence summary plus links to material artifacts per milestone; at
-# assessment time the contract itself fetches the linked artifacts and an
-# AI jury (validator consensus) judges the FETCHED artifact content against
-# the written milestone spec, returning MET / NOT_MET with a confidence
-# score. The summary is only the claim being checked -- a verdict can never
-# rest on it. If the material artifact cannot be retrieved, no verdict is
-# issued and nothing can release. A MET verdict unlocks that milestone's
-# tranche to the builder at finalization. NOT_MET leaves escrow locked and
-# the builder may revise and resubmit -- a rejected milestone never locks
-# permanently. Payouts are real EVM value transfers executed at finalization.
+# A grantor locks GEN escrow for 1-N milestones. Creation is two-phase:
+# create_grant (non-payable) validates the builder address, the title and
+# every milestone and records the grant as PENDING_FUNDING with its total
+# escrow; fund_grant (payable, grantor-only, exact-total-only) then locks
+# the GEN and moves the grant to FUNDED. No payable function in this
+# contract can ever raise after receiving value: a rejected funding
+# attempt is refunded in full inside the same call and leaves the grant
+# unfunded, so GEN can never strand in the contract without a grant or a
+# recovery path. The builder submits an evidence summary plus links to
+# material artifacts per milestone; at assessment time the contract itself
+# fetches the linked artifacts and an AI jury (validator consensus) judges
+# the FETCHED artifact content against the written milestone spec,
+# returning MET / NOT_MET with a confidence score. The summary is only the
+# claim being checked -- a verdict can never rest on it. If the material
+# artifact cannot be retrieved, no verdict is issued and nothing can
+# release. A MET verdict unlocks that milestone's tranche to the builder
+# at finalization. NOT_MET leaves escrow locked and the builder may revise
+# and resubmit -- a rejected milestone never locks permanently. Payouts
+# are real EVM value transfers executed at finalization.
 # Deployed on GenLayer StudioNet (chain 61999).
 # ---------------------------------------------------------------------------
 
@@ -74,6 +82,21 @@ def _datamark(text: str) -> str:
     for line in str(text).split("\n"):
         marked_lines.append((" " + _DATAMARK + " ").join(line.split(" ")))
     return "\n".join(marked_lines)
+
+
+def _is_valid_evm_address(addr: str) -> bool:
+    # Strict 20-byte EVM address check on the normalized form: exactly
+    # 42 chars, 0x prefix, 40 hex chars, and not the zero address.
+    # Applied to the builder at grant creation, before any funds can be
+    # committed to it.
+    if len(addr) != 42 or not addr.startswith("0x"):
+        return False
+    if addr == "0x" + "0" * 40:
+        return False
+    for ch in addr[2:]:
+        if ch not in "0123456789abcdef":
+            return False
+    return True
 
 
 def _marked_excerpt(text: str) -> str:
@@ -199,14 +222,14 @@ class GrantMilestoneVerifier(gl.Contract):
         return str(gl.message.sender_address).lower()
 
     # -- writes -----------------------------------------------------------
-    @gl.public.write.payable
+    @gl.public.write
     def create_grant(self, builder: str, title: str, milestones_json: str) -> str:
-        escrow = gl.message.value
-        if escrow == u256(0):
-            raise gl.vm.UserError("ESCROW_REQUIRED: send GEN with create_grant to fund the grant")
+        # Non-payable by design: every validation below runs with zero
+        # value at stake, so a rejection can never strand GEN in the
+        # contract. Funding is a separate grantor-only call (fund_grant).
         builder = builder.strip().lower()
-        if len(builder) < 8:
-            raise gl.vm.UserError("INVALID_BUILDER")
+        if not _is_valid_evm_address(builder):
+            raise gl.vm.UserError("INVALID_BUILDER: builder must be a real 20-byte EVM address (0x + 40 hex chars, not the zero address)")
         title = title.strip()
         if not title or len(title) > 120:
             raise gl.vm.UserError("INVALID_TITLE: title must be 1-120 chars")
@@ -242,8 +265,6 @@ class GrantMilestoneVerifier(gl.Contract):
                 "evidence_failures": 0,
                 "last_evidence_error": None,
             })
-        if u256(total) != escrow:
-            raise gl.vm.UserError("ESCROW_MISMATCH: milestone amounts must sum to the sent GEN")
         if int(self.grant_count) >= _MAX_GRANTS:
             raise gl.vm.UserError("GRANT_LIMIT_REACHED")
 
@@ -254,9 +275,9 @@ class GrantMilestoneVerifier(gl.Contract):
             "grantor": grantor,
             "builder": builder,
             "title": title,
-            "total_escrow_wei": str(escrow),
+            "total_escrow_wei": str(total),
             "released_wei": "0",
-            "status": "FUNDED",
+            "status": "PENDING_FUNDING",
             "current_milestone": 0,
             "milestones": milestones,
         }
@@ -272,10 +293,48 @@ class GrantMilestoneVerifier(gl.Contract):
             "builder": builder,
             "title": title,
             "milestone_count": len(milestones),
-            "escrow_wei": str(escrow),
-            "message": f"GRANT_CREATED: #{int(gid)} '{title}' escrowed {str(escrow)} wei GEN across {len(milestones)} milestones",
+            "escrow_wei": str(total),
+            "message": f"GRANT_CREATED: #{int(gid)} '{title}' with {len(milestones)} milestones totalling {str(total)} wei GEN, awaiting funding",
         })
-        return f"GRANT_CREATED: #{int(gid)} '{title}' escrowed {str(escrow)} wei GEN across {len(milestones)} milestones."
+        return f"GRANT_CREATED: #{int(gid)} '{title}' with {len(milestones)} milestones totalling {str(total)} wei GEN, awaiting funding."
+
+    @gl.public.write.payable
+    def fund_grant(self, grant_id: bigint) -> str:
+        # The contract's only value-receiving write, and it NEVER raises
+        # after value arrives (zero-value is the one exception: nothing
+        # can strand, so it raises like any other validation). Every
+        # other rejection refunds the full sent value to the sender
+        # inside this same call via the standard _pay transfer path and
+        # returns a rejection message -- the grant stays PENDING_FUNDING
+        # and both balances are unchanged apart from the round trip.
+        value = gl.message.value
+        if value == u256(0):
+            raise gl.vm.UserError("ESCROW_REQUIRED: fund_grant must send the grant's exact total escrow")
+        sender = self._sender()
+        gid = str(int(grant_id))
+        if gid not in self.grants:
+            self._pay(sender, value)
+            return "FUND_REJECTED: GRANT_NOT_FOUND -- full sent value refunded, no grant funded."
+        data = json.loads(self.grants[gid])
+        if sender != data["grantor"]:
+            self._pay(sender, value)
+            return "FUND_REJECTED: ONLY_GRANTOR -- full sent value refunded, grant still unfunded."
+        if data["status"] != "PENDING_FUNDING":
+            self._pay(sender, value)
+            return "FUND_REJECTED: BAD_STATUS -- full sent value refunded, grant is not awaiting funding."
+        if value != u256(int(data["total_escrow_wei"])):
+            self._pay(sender, value)
+            return "FUND_REJECTED: ESCROW_MISMATCH -- sent value does not equal the grant total, full sent value refunded."
+        data["status"] = "FUNDED"
+        self._save(gid, data)
+        self._log({
+            "type": "FUND",
+            "grant_id": int(gid),
+            "grantor": sender,
+            "escrow_wei": str(value),
+            "message": f"GRANT_FUNDED: #{int(gid)} funded with {str(value)} wei GEN",
+        })
+        return f"GRANT_FUNDED: #{int(gid)} funded with {str(value)} wei GEN."
 
     @gl.public.write
     def submit_evidence(self, grant_id: bigint, evidence_json: str) -> str:
@@ -522,6 +581,18 @@ class GrantMilestoneVerifier(gl.Contract):
         gid, data = self._load(grant_id)
         if self._sender() != data["grantor"]:
             raise gl.vm.UserError("ONLY_GRANTOR: only the grantor can cancel")
+        if data["status"] == "PENDING_FUNDING":
+            # Nothing was ever funded, so there is nothing to refund --
+            # the grant simply becomes CANCELLED and can never stick.
+            data["status"] = "CANCELLED"
+            self._save(gid, data)
+            self._log({
+                "type": "CANCEL",
+                "grant_id": int(gid),
+                "refund_wei": "0",
+                "message": f"GRANT_CANCELLED: #{int(gid)} cancelled before funding, no escrow to refund",
+            })
+            return f"GRANT_CANCELLED: #{int(gid)} cancelled before funding, no escrow to refund."
         if data["status"] != "FUNDED":
             raise gl.vm.UserError("BAD_STATUS: grant is not active")
         refund = u256(int(data["total_escrow_wei"]) - int(data["released_wei"]))

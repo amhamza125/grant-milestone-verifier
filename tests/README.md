@@ -2,11 +2,13 @@
 
 Runnable end-to-end verification for the Grant Milestone Verifier intelligent
 contract. It runs against a live StudioNet deployment and exercises the full
-grant lifecycle with three wallets: escrowed multi-tranche grants, milestone
-evidence, the AI jury, tranche releases, cancellation with refunds, the pause
-gate, owner transfer, and adversarial cases (prompt injection, sender-bound
-access control, outsider assessment/release gates, escrow mismatch, double
-submission, anti-gaming).
+grant lifecycle with three wallets: two-phase grant creation and funding,
+escrowed multi-tranche grants, milestone evidence, the AI jury, tranche
+releases, cancellation with refunds, the pause gate, owner transfer, and
+adversarial cases (prompt injection, sender-bound access control, outsider
+assessment/release gates, malformed creation input, mismatched and
+non-grantor funding attempts that must refund in full, double submission,
+anti-gaming).
 
 The contract fetches milestone evidence itself at assessment time, so the
 suite's evidence links point at real hosted artifacts: the files in
@@ -41,10 +43,11 @@ node finalize.mjs
   committed to this repo, ever.
 - The suite expects a **fresh** deployment (grant ids start at 0).
 
-`run.mjs` writes `results/results.json` (17 scenarios + every tx hash) and a
+`run.mjs` writes `results/results.json` (28 steps + every tx hash) and a
 human-readable `results/test-log.txt`. `finalize.mjs` waits for the payout
 transactions to reach FINALIZED and checks every wei moved exactly as the
-contract recorded, writing `results/finalize.json`.
+contract recorded — ending with an expected contract balance of exactly
+zero — writing `results/finalize.json`.
 
 `validate_verdict.py` is a local harness that runs the contract's real
 `_parse_verdict` function (imported from `GrantMilestoneVerifier.py` with a

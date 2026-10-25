@@ -1,27 +1,33 @@
 # Grant Milestone Verifier — Verification
 
-**Contract:** `0x1d4C89b81D4D02DB2eCDB6A39EE8D561799af19a`
+**Contract:** `0x84155333Ff1F21Bc8Bb59Bb70627B39aAE980AD8`
 **Network:** GenLayer StudioNet (chain 61999)
-**Explorer:** https://explorer-studio.genlayer.com/address/0x1d4C89b81D4D02DB2eCDB6A39EE8D561799af19a
-**Deploy tx:** https://explorer-studio.genlayer.com/tx/0x2100fd8a582a881d808b42776f9557b03ad0769deca9fe0273e4e80bc
+**Explorer:** https://explorer-studio.genlayer.com/address/0x84155333Ff1F21Bc8Bb59Bb70627B39aAE980AD8
+**Deploy tx:** https://explorer-studio.genlayer.com/tx/0x14dd9ff67000dc0730688d3fd6dfbe769085e55d9354530e8fd2ceb4dac15eaa
 **Source:** `GrantMilestoneVerifier.py` (this repo, exact file deployed)
-**Test date:** 2026-10-23
+**Test date:** 2026-10-25 (fresh-deployment suite run in progress; prior deployment results below)
 
-The same source was first exercised on a rehearsal deployment
-(`0xA8A6A83FA71B59dd6C66f9Be3E1Ae8bffb947e28`, deploy tx
-[`0x1f33b3ed...5d4a7`](https://explorer-studio.genlayer.com/tx/0x1f33b3ed3a2ff3ba3d6874208eb8b457ccb836d496bebcc7f83773fb9065d4a7))
-with the full 17-scenario suite below. The production deployment above is
-byte-identical source.
+The same source design was previously exercised on deployment
+`0x1d4C89b81D4D02DB2eCDB6A39EE8D561799af19a` (2026-10-23: 20/22 steps
+passed; the two non-passes were harness-side). The deployment above carries
+the corrected creation flow (two-phase funding, no stranded GEN) and its
+28-step suite is running against this address; results will replace the
+prior-run rows below when the run completes.
 
 ## What this contract does
 
-A grantor locks GEN escrow against a list of milestones. A builder submits
-evidence per milestone. An AI jury (comparative prompt consensus) returns a
-strict-schema verdict — MET or NOT_MET with a 1–100 score. MET releases the
-milestone's tranche to the builder; NOT_MET reopens the milestone for
-resubmission with escrow untouched. The grantor can cancel anytime and recover
-unclaimed escrow. Only the grantor or the builder can trigger an assessment or
-release a tranche; outsiders are rejected.
+A grantor locks GEN escrow against a list of milestones. Creation is
+two-phase: `create_grant` validates the builder, the title, and every
+milestone and records the grant as `PENDING_FUNDING` with its total escrow;
+`fund_grant` (grantor-only, exact total) then locks the GEN and moves the
+grant to `FUNDED`. A builder submits evidence per milestone. An AI jury
+(comparative prompt consensus) returns a strict-schema verdict — MET or
+NOT_MET with a 1–100 score. MET releases the milestone's tranche to the
+builder; NOT_MET reopens the milestone for resubmission with escrow
+untouched. The grantor can cancel anytime and recover unclaimed escrow —
+and can also cancel an unfunded grant, which simply becomes `CANCELLED`
+with nothing to refund. Only the grantor or the builder can trigger an
+assessment or release a tranche; outsiders are rejected.
 
 ## Evidence grounding — the design
 
@@ -59,13 +65,53 @@ Kept from the earlier hardened build: `ONLY_PARTY_ASSESS` /
 verdict JSON (malformed verdict → fail closed), the same state machine and
 settlement math.
 
-## Full suite — 20/22 steps passed
+## Creation, funding, and the no-stranded-funds rule
 
-Run with `tests/run.mjs` (genlayer-js) against the rehearsal deployment
-above. Every write transaction reached FINALIZED on-chain. All 17 scenarios
-use real hosted fixture artifacts under `tests/fixtures/`
-(raw.githubusercontent.com), fetched by the contract itself during each
-assessment.
+No payable function in this contract can raise after receiving value.
+That is a structural property, not a convention:
+
+1. **Creation carries no value.** `create_grant` is non-payable. Every
+   validation runs with zero value at stake: the builder must be a real
+   20-byte EVM address (exactly 42 chars, `0x` prefix, 40 hex chars,
+   not the zero address — `INVALID_BUILDER` otherwise), the title 1–120
+   chars, the milestones a JSON list of 1–20 entries each with a 1–2000
+   char spec and a positive integer `amount_wei`, and the grant count
+   under the limit. Any rejection raises before any grant exists and
+   before any GEN moves.
+2. **Funding is a separate, exact, refunding call.** `fund_grant` is the
+   contract's only payable function. Zero value raises (nothing can
+   strand). Every other rejection — unknown grant, non-grantor sender,
+   grant not awaiting funding, sent value not equal to the recorded
+   total — refunds the full sent value to the sender inside the same
+   call through the standard transfer path and returns a `FUND_REJECTED`
+   message instead of raising. The grant stays `PENDING_FUNDING`.
+3. **Every state has an exit.** A `PENDING_FUNDING` grant can never
+   stick: the grantor can fund it exactly, or cancel it (no refund
+   owed, since nothing was funded). Funded grants cancel with the exact
+   unclaimed remainder, as before.
+4. **The suite proves it in wei.** Rejected creations and rejected
+   funding attempts are asserted with caller and contract balances
+   measured before and after, exactly equal — and the suite's final
+   cleanup asserts a contract balance of exactly zero. There is no
+   residual anywhere in the flow, by construction and by test.
+
+## Full suite — 28 steps (current suite, for a fresh deployment)
+
+Run with `tests/run.mjs` (genlayer-js) against a fresh deployment (the
+suite expects grant ids from 0). Every write transaction is awaited to
+ACCEPTED and checked by `tests/finalize.mjs` for FINALIZED + wei-exact
+settlement. All scenarios use real hosted fixture artifacts under
+`tests/fixtures/` (raw.githubusercontent.com), fetched by the contract
+itself during each assessment.
+
+The S1–S13 and G1–G4 rows below carry the rehearsal run's results on the
+prior deployment (2026-10-23: 20/22 steps passed; the two non-passes were
+harness-side — see the notes). The grounding logic, jury logic, release
+math, and funded-cancel math are unchanged in the current source, and the
+S1–S13/G1–G4 scenario code changed only in the creation step
+(create-then-fund instead of create-with-value). The S7a/S7b, N1–N3, and
+cleanup rows are the current suite's new steps, written for the fresh
+deployment run.
 
 | # | Scenario | Result | What was proven |
 |---|----------|--------|-----------------|
@@ -76,7 +122,8 @@ assessment.
 | S4 | Access control — submit (grant 3) | PASS | Grantor calling `submit_evidence` → execution_result=ERROR, milestone stays OPEN |
 | S5 | Access control — cancel (grant 3) | PASS | Builder calling `cancel_grant` → execution_result=ERROR, grant stays FUNDED |
 | S6 | Mid-grant cancel (grant 4, 1.0 GEN) | PASS | Tranche 0 paid 0.5 GEN kept by builder, unclaimed 0.5 GEN refunded, grant CANCELLED |
-| S7 | Escrow mismatch (no grant) | PASS | Milestones sum 0.5 GEN but 1.0 GEN sent → rejected, grant_count unchanged |
+| S7a | Builder validation (no grant) | new step | 5 malformed builders (too short, non-hex, missing 0x, too long, zero address) → all INVALID_BUILDER, grant_count unchanged, caller + contract balances unchanged in wei |
+| S7b | Milestone validation (no grant) | new step | Bad JSON / zero amount / empty spec / empty list → all rejected, grant_count unchanged, both balances unchanged in wei |
 | S8 | Double submit (grant 5) | PASS | Second `submit_evidence` while SUBMITTED → execution_result=ERROR |
 | S9 | Release without verdict (grant 5) | PASS | `release_tranche` on SUBMITTED milestone → execution_result=ERROR, nothing paid |
 | S10 | Pause gate (grant 6, 0.25 GEN) | PASS | Submit while paused → ERROR; after resume: MET, 0.25 GEN paid, grant COMPLETE |
@@ -88,15 +135,21 @@ assessment.
 | G3 | Unreachable evidence (grant 11) | PASS | Dead link → EVIDENCE_UNREACHABLE recorded (failures=1), no verdict, no release, contract balance unchanged, milestone reopened |
 | G3b | Re-assess after fix (grant 11) | PASS | Same milestone re-submitted with a reachable artifact → MET, 0.25 GEN released, grant COMPLETE |
 | G4 | Outsider gates on grounded verdict (grant 12) | PASS | Grounded MET recorded; outsider release → ONLY_PARTY_RELEASE, outsider assess → ONLY_PARTY_ASSESS, nothing paid; grantor then released 0.25 GEN |
-| cleanup | Leftover cancel + history | see note | S7 residual escrow (expected) |
+| N1 | Funding mismatch, then exact fund (grant 13) | new step | Create → PENDING_FUNDING; 1.0 GEN against a 0.25 GEN total → FUND_REJECTED return (not an error), full refund, grant still PENDING_FUNDING, both balances unchanged; exact 0.25 GEN fund → FUNDED, MET, 0.25 GEN released, builder +0.25 GEN exactly |
+| N2 | Non-grantor funding, unfunded cancel (grant 14) | new step | Stranger funds the exact 0.25 GEN → FUND_REJECTED return, full refund, grant still PENDING_FUNDING, both balances unchanged; grantor cancels the never-funded grant → CANCELLED, zero refund owed, contract balance unchanged |
+| N3 | Exact mid-grant cancel (grant 15, 1.0 GEN) | new step | Tranche 0 paid 0.5 GEN kept; cancel refunds exactly 0.5 GEN to the grantor, contract balance falls by exactly 0.5 GEN |
+| cleanup | Leftover cancel + history | new step | Leftover grants cancelled, contract balance exactly 0 — no residual anywhere |
 
-**Suite total:** 20/22 steps passed; all four grounding scenarios (G1–G4) pass,
-all 13 regression scenarios pass.
+**Suite total:** 28 steps in the current suite. The prior deployment's
+rehearsal run passed 20/22; the current suite's new and changed steps
+(S7a/S7b, N1–N3, cleanup-to-zero) run against the fresh deployment.
 
 Notes: S2b — the jury held out for the literal published URL named in the
-milestone spec; the claim text and fixture now name it explicitly. Cleanup —
-expected leftover from S7's intentional escrow-mismatch rejection (0.5 GEN
-escrow stays credited to the contract; no other residual).
+milestone spec; the claim text and fixture now name it explicitly. The
+prior run's cleanup non-pass was the old suite's own expectation of a
+1 GEN residual from its escrow-mismatch rejection; the current suite
+expects zero residual, because rejected creations carry no value and
+rejected funding attempts refund inline.
 
 ## Transaction matrix
 

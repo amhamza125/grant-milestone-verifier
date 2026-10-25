@@ -31,7 +31,7 @@ multi-tranche, not one-shot; two-party (grantor/builder), not three-party.
 
 ## State machine
 
-- PROPOSED → FUNDED (escrow locked, milestones registered)
+- PROPOSED → PENDING_FUNDING (terms registered, no value moved) → FUNDED (exact escrow received)
 - per milestone: OPEN → SUBMITTED → VERIFIED (tranche paid) /
   REJECTED (back to OPEN, resubmission allowed)
 - grant-level: ACTIVE → COMPLETE (all milestones verified) /
@@ -40,8 +40,13 @@ multi-tranche, not one-shot; two-party (grantor/builder), not three-party.
 
 ## Functions (write)
 
-- `create_grant(builder, milestones_json, total_escrow)` — payable; validates
-  milestone amounts sum to escrow; milestones ≥ 1, ≤ 20.
+- `create_grant(builder, title, milestones_json)` — non-payable; validates
+  the builder as a real 20-byte EVM address, title, and milestones
+  (≥ 1, ≤ 20); registers the grant as PENDING_FUNDING with no value moved.
+- `fund_grant(grant_id)` — payable, grantor only; accepts exactly the
+  recorded escrow total. Any rejection after value arrives refunds the full
+  sent value in the same call instead of raising, so rejected funding can
+  never strand GEN.
 - `submit_evidence(grant_id, evidence_json)` — builder only (sender-bound);
   evidence: summary text + links list; one open submission per milestone.
 - `assess_milestone(grant_id)` — triggers the AI jury; stores verdict.

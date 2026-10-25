@@ -4,13 +4,14 @@ I built this because grant payouts usually run on trust: someone promises work, 
 
 ## The deal, in plain words
 
-A grantor locks GEN against a list of milestones. A builder submits evidence for each milestone. The contract fetches the linked evidence artifacts itself and an AI jury judges the *fetched content* — not the builder's summary — returning a strict verdict: MET or NOT_MET, with a 1–100 score, a reason, and a grounding receipt (SHA-256 of the artifact it actually judged). MET releases that milestone's tranche to the builder automatically. NOT_MET sends the milestone back to OPEN with the escrow untouched, so the builder can resubmit. If the evidence can't be retrieved, no verdict is issued at all and the milestone reopens for resubmission. The grantor can cancel anytime and get back whatever hasn't been paid out.
+A grantor locks GEN against a list of milestones. Creation happens in two steps: first `create_grant` validates the builder, the title, and every milestone and records the grant as awaiting funding — no GEN moves yet, so a rejected creation can never strand funds. Then the grantor funds the exact total with `fund_grant`, which locks the escrow. A builder submits evidence for each milestone. The contract fetches the linked evidence artifacts itself and an AI jury judges the *fetched content* — not the builder's summary — returning a strict verdict: MET or NOT_MET, with a 1–100 score, a reason, and a grounding receipt (SHA-256 of the artifact it actually judged). MET releases that milestone's tranche to the builder automatically. NOT_MET sends the milestone back to OPEN with the escrow untouched, so the builder can resubmit. If the evidence can't be retrieved, no verdict is issued at all and the milestone reopens for resubmission. The grantor can cancel anytime and get back whatever hasn't been paid out — including cancelling a grant that was never funded, which simply closes with nothing to refund. And the funding rule is absolute: no payable call in the contract can raise after receiving value. A funding attempt that fails any check refunds the full sent value inside the same call and leaves the grant unfunded.
 
 ## Numbers
 
-- **Contract:** `0x1d4C89b81D4D02DB2eCDB6A39EE8D561799af19a` (GenLayer StudioNet, chain 61999)
-- **Adversarial suite:** 20/22 steps passed (17 scenarios incl. 4 evidence-grounding scenarios), every write transaction FINALIZED
-- **Escrow tested:** 4.50 GEN across 9 grants — 2.75 GEN paid to the builder, 1.75 GEN refunded, all to the wei
+- **Contract:** `0x1d4C89b81D4D02DB2eCDB6A39EE8D561799af19a` (GenLayer StudioNet, chain 61999) — prior deployment; the current suite runs against a fresh deployment
+- **Adversarial suite (prior deployment run):** 20/22 steps passed (17 scenarios incl. 4 evidence-grounding scenarios), every write transaction FINALIZED
+- **Current suite:** 28 steps, adding creation-validation scenarios (malformed builders and milestones rejected with balances unchanged) and funding-flow scenarios (mismatched and non-grantor funding refunded in full, exact mid-grant cancel settlement, zero contract residual)
+- **Escrow tested (prior run):** 4.50 GEN across 9 grants — 2.75 GEN paid to the builder, 1.75 GEN refunded, all to the wei
 - **Jury verdicts observed:** real milestones scored 90–100 (MET); vague evidence scored 1–2 (NOT_MET); a prompt-injection attempt scored NOT_MET with zero payout; a summary contradicting its fetched artifact scored NOT_MET (5) with zero release; an unreachable evidence link recorded EVIDENCE_UNREACHABLE with no verdict and no release
 
 ## How the jury works
@@ -19,17 +20,18 @@ A grantor locks GEN against a list of milestones. A builder submits evidence for
 
 ## State machine
 
-`FUNDED → (per milestone) OPEN → SUBMITTED → APPROVED → VERIFIED → COMPLETE`, with `CANCELLED` reachable from `FUNDED` at any time. NOT_MET returns a milestone to OPEN instead of advancing it.
+`PENDING_FUNDING → FUNDED → (per milestone) OPEN → SUBMITTED → APPROVED → VERIFIED → COMPLETE`, with `CANCELLED` reachable from `PENDING_FUNDING` (nothing to refund) and from `FUNDED` (exact unclaimed remainder refunded) at any time. NOT_MET returns a milestone to OPEN instead of advancing it.
 
 ## Functions
 
 | Function | Who | What |
 |----------|-----|------|
-| `create_grant(builder, title, milestones_json)` | anyone (payable) | Locks escrow; escrow must equal the milestone sum exactly |
+| `create_grant(builder, title, milestones_json)` | anyone (non-payable) | Validates builder (real 20-byte EVM address), title, and milestones; records the grant as `PENDING_FUNDING` with its total escrow |
+| `fund_grant(grant_id)` | grantor only (payable) | Locks the exact total escrow; any failed check refunds the full sent value inline and returns `FUND_REJECTED` instead of raising |
 | `submit_evidence(grant_id, evidence_json)` | builder only | Submits `{summary, links}` for the current milestone |
 | `assess_milestone(grant_id)` | grantor or builder | Runs the AI jury; records verdict on consensus |
 | `release_tranche(grant_id)` | grantor or builder | Pays the milestone amount to the builder on a MET verdict |
-| `cancel_grant(grant_id)` | grantor only | Refunds unclaimed escrow |
+| `cancel_grant(grant_id)` | grantor only | Refunds unclaimed escrow; closes an unfunded grant with nothing to refund |
 | `set_paused(bool)` | owner only | Freezes submits/assesses/releases |
 | `transfer_ownership(new_owner)` | owner only | Two-address owner model, lowercase-hex |
 
@@ -37,7 +39,7 @@ Views: `get_grant`, `get_milestone`, `get_verdict`, `get_grants_for_party`, `get
 
 ## What the tests proved
 
-The suite in `tests/` covers the happy path (3 tranches, all MET, grant COMPLETE), NOT_MET with resubmission, a prompt-injection attack (defeated), access control both directions (grantor can't submit, builder can't cancel), outsider gates (a stranger can trigger neither assessment nor release), mid-grant cancel with partial refund, escrow mismatch rejection, double-submit and release-without-verdict rejection, the pause gate, owner transfer with old-owner lockout, and anti-gaming evidence (unrelated links → NOT_MET). Full details, transaction hashes, and honest limitations in `docs/VERIFICATION.md`.
+The suite in `tests/` covers the happy path (3 tranches, all MET, grant COMPLETE), NOT_MET with resubmission, a prompt-injection attack (defeated), access control both directions (grantor can't submit, builder can't cancel), outsider gates (a stranger can trigger neither assessment nor release), mid-grant cancel with partial refund, creation validation (malformed builders and milestones rejected with caller and contract balances unchanged to the wei), funding-flow safety (a mismatched funding amount and a non-grantor funding attempt both return a rejection with a full inline refund and the grant left unfunded, an unfunded grant cancelled cleanly, and a mid-grant cancel settling exactly), double-submit and release-without-verdict rejection, the pause gate, owner transfer with old-owner lockout, and anti-gaming evidence (unrelated links → NOT_MET). Full details, transaction hashes, and honest limitations in `docs/VERIFICATION.md`.
 
 ## Design notes
 

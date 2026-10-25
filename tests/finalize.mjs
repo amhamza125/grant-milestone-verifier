@@ -19,6 +19,7 @@ const watch = [
   R.txs.s2_release, R.txs.s6_release, R.txs.s6_cancel, R.txs.s10_release,
   R.txs.s13_assess, R.txs.s13_release,
   R.txs.g1_release, R.txs.g3_release, R.txs.g4_release,
+  R.txs.n1_release, R.txs.n3_release, R.txs.n3_cancel,
   R.txs.cleanup_2, R.txs.cleanup_3, R.txs.cleanup_5, R.txs.cleanup_7, R.txs.cleanup_8,
   R.txs.cleanup_10, R.txs.cleanup_12,
 ].filter(Boolean);
@@ -51,13 +52,15 @@ for (let gid = 0; gid < grantCount; gid++) {
 }
 const grantorAfter = await bal(R.grantor); const builderAfter = await bal(R.builder);
 const grantorBefore = BigInt(R.balances.grantor_start); const builderBefore = BigInt(R.balances.builder_start);
-// S7 sent 1.0 GEN with 0.5 GEN of milestones and reverted with ESCROW_MISMATCH.
-// GenVM rolls back storage on UserError, but the EVM msg.value stays in the
-// contract balance — so it left the grantor's wallet without creating a grant.
-const s7RevertedValue = R.txs.s7_create ? (10n ** 18n) : 0n;
-const expGrantor = grantorBefore - escrowTotal - s7RevertedValue + grantorRefunded;
+// No-stranded-funds accounting: rejected creations carry no value, and every
+// rejected funding attempt refunds inline, so the expected contract balance
+// is exactly zero. (One bookkeeping note: the N2 grant was created with a
+// 0.25 GEN total and cancelled before funding, so its phantom 0.25 GEN
+// appears in both escrowTotal and grantorRefunded and cancels out of the
+// grantor identity below — net zero, exactly as the chain shows.)
+const expGrantor = grantorBefore - escrowTotal + grantorRefunded;
 const expBuilder = builderBefore + builderPaid;
-const expContractBal = s7RevertedValue;
+const expContractBal = 0n;
 const ok = grantorAfter === expGrantor && builderAfter === expBuilder;
 const contractBal = await bal(ADDR);
 const balOk = contractBal === expContractBal;
@@ -66,7 +69,7 @@ const out = {
   grantor_before: gen(grantorBefore), grantor_after: gen(grantorAfter), grantor_expected: gen(expGrantor),
   builder_before: gen(builderBefore), builder_after: gen(builderAfter), builder_expected: gen(expBuilder),
   escrow_total_gen: gen(escrowTotal), builder_paid_gen: gen(builderPaid), grantor_refunded_gen: gen(grantorRefunded),
-  s7_reverted_value_gen: gen(s7RevertedValue),
+  stranded_value_gen: gen(0n),
   contract_balance_wei: contractBal.toString(),
   expected_contract_balance_wei: expContractBal.toString(),
   tx_statuses: statuses,
