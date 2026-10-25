@@ -97,6 +97,42 @@ That is a structural property, not a convention:
    cleanup asserts a contract balance of exactly zero. There is no
    residual anywhere in the flow, by construction and by test.
 
+## Targeted proof — no stranded GEN, proven live 2026-10-25
+
+Run against this deployment (`tests/targeted-proof.mjs`, every balance
+measured after FINALIZED settlement). All 10 grants on the deployment
+ended terminal (3 COMPLETE, 7 CANCELLED, none open); final contract
+balance exactly 0 wei.
+
+- **Malformed builders (5 inputs: too short, non-hex, missing `0x`, too
+  long, zero address):** all rejected with ERROR receipts; grant_count
+  unchanged; grantor delta 0 wei; contract delta 0 wei.
+- **Malformed milestone sets (4 inputs: bad JSON, zero amount, empty
+  spec, empty list):** all rejected with ERROR receipts; grant_count
+  unchanged; grantor delta 0 wei; contract delta 0 wei.
+- **Funding mismatch (grant 8, 0.25 GEN total):** 1.0 GEN sent →
+  rejection RETURNED (execution SUCCESS, not ERROR), grant stayed
+  `PENDING_FUNDING`, full 1.0 GEN refunded; grantor delta 0 wei,
+  contract delta 0 wei. Exact 0.25 GEN fund → `FUNDED`, contract
+  +250000000000000000 wei; grantor cancel → +250000000000000000 wei
+  refunded exactly, grant `CANCELLED`.
+- **Outsider funding (grant 9, 0.25 GEN total):** outsider's exact
+  0.25 GEN → rejection RETURNED, grant stayed `PENDING_FUNDING`, full
+  refund; outsider delta 0 wei, contract delta 0 wei. Grantor cancel
+  of the never-funded grant → `CANCELLED`, zero refund owed.
+- **Drain/cleanup:** every still-open grant cancelled with its exact
+  escrow refunded (250000000000000000 wei each); final contract
+  balance exactly 0 wei.
+
+Note on scope: the full 28-step suite on this deployment passed 14
+steps (happy path, NOT_MET/resubmit, injection, gates, cancel, pause,
+owner transfer) before stalling at s12 on a jury verdict that never
+arrived after 45 minutes — an intermittent consensus-latency pattern,
+not a contract failure (the same evidence later produced a verdict on
+a rerun). s12, s13, and G1–G4 on this deployment are therefore not
+claimed here; G1–G4 grounding was proven on the prior deployment, and
+the no-stranded-funds property above is proven live on this one.
+
 ## Full suite — 28 steps (current suite, for a fresh deployment)
 
 Run with `tests/run.mjs` (genlayer-js) against a fresh deployment (the
