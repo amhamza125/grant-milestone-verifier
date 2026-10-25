@@ -1,17 +1,19 @@
 # Grant Milestone Verifier — Verification
 
-**Contract:** `0x84155333Ff1F21Bc8Bb59Bb70627B39aAE980AD8`
+**Contract:** `0x5EFB40d03933c83db1b0649141D0ef7743b69641`
 **Network:** GenLayer StudioNet (chain 61999)
-**Explorer:** https://explorer-studio.genlayer.com/address/0x84155333Ff1F21Bc8Bb59Bb70627B39aAE980AD8
-**Deploy tx:** https://explorer-studio.genlayer.com/tx/0x14dd9ff67000dc0730688d3fd6dfbe769085e55d9354530e8fd2ceb4dac15eaa
+**Explorer:** https://explorer-studio.genlayer.com/address/0x5EFB40d03933c83db1b0649141D0ef7743b69641
+**Deploy tx:** https://explorer-studio.genlayer.com/tx/0x600a1e22b6e49588206ae0ee7bd088a88d862631e029d472edc7ab385f2950e1
 **Source:** `GrantMilestoneVerifier.py` (this repo, exact file deployed)
 **Test date:** 2026-10-25 (fresh-deployment suite run in progress; prior deployment results below)
 
 The same source design was previously exercised on deployment
 `0x1d4C89b81D4D02DB2eCDB6A39EE8D561799af19a` (2026-10-23: 20/22 steps
-passed; the two non-passes were harness-side). The deployment above carries
-the corrected creation flow (two-phase funding, no stranded GEN) and its
-28-step suite is running against this address; results will replace the
+passed; the two non-passes were harness-side). An earlier deployment of
+this corrected source (`0x8415…`) passed the full happy path live before
+its suite run stalled on a slow jury verdict and the harness died; this
+fresh deployment carries the identical byte-identical source and its
+28-step suite is running against this address. Results will replace the
 prior-run rows below when the run completes.
 
 ## What this contract does
